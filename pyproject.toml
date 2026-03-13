@@ -1,0 +1,47 @@
+[project]
+name = "redline-radar"
+version = "0.1.0"
+description = "CLI tool that generates standalone HTML summary reports for Bluebeam Studio Sessions"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "revu-wrangler @ git+https://github.com/aa-dank/revu_wrangler.git",
+    "click>=8.1",
+    "rich>=13.0",
+    "jinja2>=3.1",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pyinstaller>=6.0",
+]
+
+[project.scripts]
+redline-radar = "redline_radar.cli:main"
+
+[build-system]
+requires = ["setuptools>=68.0", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+redline_radar = ["templates/*.html"]
+
+# ─────────────────────────────────────────────────────────────────────
+# PyInstaller build command (for reference):
+#
+#   pyinstaller --onefile --name redline_radar \
+#     --add-data ".env;." \
+#     --add-data "src/redline_radar/templates;redline_radar/templates" \
+#     src/redline_radar/__main__.py
+#
+# On macOS/Linux, replace ";" separators with ":":
+#
+#   pyinstaller --onefile --name redline_radar \
+#     --add-data ".env:." \
+#     --add-data "src/redline_radar/templates:redline_radar/templates" \
+#     src/redline_radar/__main__.py
+# ─────────────────────────────────────────────────────────────────────
