@@ -1,0 +1,41 @@
+# Environment & credentials
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+*.spec
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Tokens / auth state (contains user credentials)
+tokens.json
+*.token
+
+# PyInstaller
+*.exe
+*.app
+
+# Test outputs
+development/output/
