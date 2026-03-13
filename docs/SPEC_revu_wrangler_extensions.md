@@ -1,6 +1,6 @@
-# Spec: bluebeam_py Extensions Required for Redline Radar
+# Spec: revu_wrangler Extensions Required for Redline Radar
 
-> This document specifies the minimum additions needed in [bluebeam_py](https://github.com/aa-dank/bluebeam_py) before the Redline Radar app can be built. It is a parallel spec — implement these in bluebeam_py; the app spec assumes they exist.
+> This document specifies the minimum additions needed in [revu_wrangler](https://github.com/aa-dank/revu_wrangler) (formerly bluebeam_py) before the Redline Radar app can be built. It is a parallel spec — implement these in revu_wrangler; the app spec assumes they exist.
 
 ---
 

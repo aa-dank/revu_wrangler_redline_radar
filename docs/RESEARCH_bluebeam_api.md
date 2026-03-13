@@ -1,6 +1,6 @@
 # Research: Bluebeam Studio API — Endpoints Relevant to Redline Radar
 
-> Compiled 2026-03-13. Sources: [Bluebeam Developer Portal](https://developers.bluebeam.com/s/studio), [Studio Session Guide](https://support.bluebeam.com/developer/studio-session-guide.html), [Authentication Guide](https://support.bluebeam.com/developer/authentication-guide.html), [Bluebeam Postman Workspace](https://www.postman.com/bluebeam-developers/workspace/bluebeam-api/overview), and the existing [bluebeam_py](https://github.com/aa-dank/bluebeam_py) SDK.
+> Compiled 2026-03-13. Sources: [Bluebeam Developer Portal](https://developers.bluebeam.com/s/studio), [Studio Session Guide](https://support.bluebeam.com/developer/studio-session-guide.html), [Authentication Guide](https://support.bluebeam.com/developer/authentication-guide.html), [Bluebeam Postman Workspace](https://www.postman.com/bluebeam-developers/workspace/bluebeam-api/overview), and the existing [revu_wrangler](https://github.com/aa-dank/revu_wrangler) SDK (formerly bluebeam_py).
 
 ---
 
@@ -69,7 +69,7 @@ The API uses a standard three-legged OAuth flow:
 
 ---
 
-## 3. Session Endpoints — Currently in bluebeam_py
+## 3. Session Endpoints — Currently in revu_wrangler
 
 These endpoints are already implemented in the SDK:
 
@@ -88,7 +88,7 @@ These endpoints are already implemented in the SDK:
 
 ---
 
-## 4. Session Endpoints — MISSING from bluebeam_py (Needed for This App)
+## 4. Session Endpoints — MISSING from revu_wrangler (Needed for This App)
 
 ### 4a. Session Users
 

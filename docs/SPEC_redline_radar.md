@@ -33,7 +33,7 @@ revu_wrangler_redline_radar/
 ├── docs/
 │   ├── RESEARCH_bluebeam_api.md
 │   ├── RESEARCH_cli_ux_patterns.md
-│   ├── SPEC_bluebeam_py_extensions.md
+│   ├── SPEC_revu_wrangler_extensions.md
 │   └── SPEC_redline_radar.md   # (this file)
 ├── src/
 │   └── redline_radar/
@@ -55,13 +55,14 @@ revu_wrangler_redline_radar/
 
 | Package | Purpose |
 |---------|---------|
-| `bluebeam-py` | Bluebeam Studio API wrapper (git dependency) |
+| `revu-wrangler` | Bluebeam Studio API wrapper ([git dependency](https://github.com/aa-dank/revu_wrangler)) |
 | `click` | CLI user input |
 | `rich` | Formatted terminal output |
 | `jinja2` | HTML report templating |
+| `python-dotenv` | Load `.env` file for credentials |
 | `pyinstaller` | Packaging as .exe (dev dependency) |
 
-**Python version:** 3.13+ (matching bluebeam_py)
+**Python version:** 3.13+ (matching revu_wrangler)
 
 **Project manager:** uv
 
@@ -99,14 +100,21 @@ revu_wrangler_redline_radar/
 - Windows: `%USERPROFILE%\.redline_radar\tokens.json`
 - Structure: `{ "access_token": "...", "refresh_token": "...", "expires_at": 1234567890 }`
 
-### Security Notes (Public Repo Awareness)
-- **client_id and client_secret must NOT be hardcoded in source**
-- Options:
-  - Environment variables: `BLUEBEAM_CLIENT_ID`, `BLUEBEAM_CLIENT_SECRET`
-  - Config file: `~/.redline_radar/config.json` (created on first setup)
-  - Bundled with exe but obfuscated (least secure, but pragmatic for internal tool)
+### Credential Management
+- **client_id and client_secret must NOT be hardcoded in source** (public repo)
+- Credentials are stored in a `.env` file loaded via `python-dotenv`
+- At development time: `.env` in the project root (gitignored)
+- At distribution time: `.env` is **baked into the PyInstaller exe** alongside the binary so PMs don't need to manage credentials
 - Token file should be user-read-only permissions where possible
 - The redirect_uri (`http://localhost:5000/callback`) must be registered in the Bluebeam Developer Portal
+
+**`.env` file format:**
+```
+BLUEBEAM_CLIENT_ID=your-client-id-here
+BLUEBEAM_CLIENT_SECRET=your-client-secret-here
+BLUEBEAM_REDIRECT_URI=http://localhost:5000/callback
+BLUEBEAM_REGION=US
+```
 
 ### Local Callback Server
 
@@ -371,34 +379,45 @@ def build_markup_summary(files: list[dict], session_id: str, client) -> list[dic
 
 ## 8. Configuration
 
-### Config File: `~/.redline_radar/config.json`
-```json
-{
-    "client_id": "your-bluebeam-client-id",
-    "client_secret": "your-bluebeam-client-secret",
-    "redirect_uri": "http://localhost:5000/callback",
-    "region": "US",
-    "output_dir": "~/Downloads"
-}
+### Credentials via `.env` + python-dotenv
+
+All Bluebeam API credentials are loaded from a `.env` file using `python-dotenv`.
+
+**`.env` file:**
+```
+BLUEBEAM_CLIENT_ID=your-client-id-here
+BLUEBEAM_CLIENT_SECRET=your-client-secret-here
+BLUEBEAM_REDIRECT_URI=http://localhost:5000/callback
+BLUEBEAM_REGION=US
 ```
 
-### Environment Variable Overrides
-| Variable | Purpose |
-|----------|---------|
-| `BLUEBEAM_CLIENT_ID` | OAuth client ID |
-| `BLUEBEAM_CLIENT_SECRET` | OAuth client secret |
-| `REDLINE_RADAR_OUTPUT_DIR` | Override default output directory |
+**Resolution order for `.env` location:**
+1. Adjacent to the executable (for PyInstaller builds — baked in at build time)
+2. Current working directory (for development)
+3. Project root (fallback for dev)
 
-**Precedence:** env vars > config file > defaults
+If no `.env` is found and the required variables are missing, the CLI should show a clear error:
+```
+✖ Missing Bluebeam credentials.
+  Expected a .env file with BLUEBEAM_CLIENT_ID and BLUEBEAM_CLIENT_SECRET.
+  See README for setup instructions.
+```
 
-### First-Run Setup
-If no config file exists and no env vars are set, the CLI should prompt:
+### Output Directory
+
+Default: user's Downloads folder (`~/Downloads` / `%USERPROFILE%\Downloads`).
+
+### `.env` in the Exe Build
+
+When building the PyInstaller exe for distribution, the `.env` file is bundled:
+```bash
+pyinstaller --onefile --name redline_radar \
+  --add-data ".env;." \
+  --add-data "src/redline_radar/templates;redline_radar/templates" \
+  src/redline_radar/__main__.py
 ```
-No configuration found. Let's set up Redline Radar.
-Bluebeam Client ID: ___
-Bluebeam Client Secret: ___
-Save configuration to ~/.redline_radar/config.json? [Y/n]:
-```
+
+This means PMs receive a single exe that already has credentials embedded. Not cryptographically secure, but pragmatic for an internal department tool.
 
 ---
 
@@ -406,15 +425,15 @@ Save configuration to ~/.redline_radar/config.json? [Y/n]:
 
 ### Build Command
 ```bash
-pyinstaller --onefile --name redline_radar src/redline_radar/__main__.py
+pyinstaller --onefile --name redline_radar \
+  --add-data ".env;." \
+  --add-data "src/redline_radar/templates;redline_radar/templates" \
+  src/redline_radar/__main__.py
 ```
 
 ### Bundled Assets
-The Jinja2 template (`report.html`) needs to be bundled:
-```python
-# In pyinstaller spec or via --add-data
-# --add-data "src/redline_radar/templates;redline_radar/templates"
-```
+- `.env` file with Bluebeam credentials (baked into exe for PM distribution)
+- Jinja2 HTML template (`report.html`)
 
 ### Template Path Resolution
 ```python
@@ -444,7 +463,7 @@ The resulting `redline_radar.exe` is a single file that PMs can put anywhere and
 | Invalid session ID format | Red message, re-prompt |
 | Session not found (404) | Red message: "Session 117-770-339 not found. Check the ID and ensure you have access." |
 | Auth token expired, refresh fails | Re-initiate OAuth flow |
-| Rate limited (429) | Automatic retry (handled by bluebeam_py) + status message |
+| Rate limited (429) | Automatic retry (handled by revu_wrangler) + status message |
 | Markup endpoint returns error (Beta instability) | Yellow warning, skip markups section, still show attendance |
 | File write permission error | Red error with path, suggest alternative |
 | User cancels OAuth in browser | Timeout after 120s, red message, option to retry |
@@ -458,17 +477,21 @@ The resulting `redline_radar.exe` is a single file that PMs can put anywhere and
 3. **Pagination:** Do markup lists paginate? If a file has hundreds of markups, does the API return them all or require paging?
 4. **`read_prime` scope sufficiency:** Can we use the read-only scope for all data access, or does the markup Beta endpoint require `full_user`?
 5. **Multi-line paste in CLI:** `click.prompt` handles single-line input. For pasting invitation text blocks, we may need a custom input loop or instruct users to just paste (the regex will find the ID regardless).
-6. **Output directory:** Default to `~/Downloads` or the current working directory?
-7. **Session name in filename:** The session name may contain special characters. Need a slug function to sanitize for filenames.
+6. **Session name in filename:** The session name may contain special characters. Need a slug function to sanitize for filenames.
 
 ---
 
-## 12. Future Enhancements (Out of Scope for v1)
+## 12. Versioning
 
-- CSV/Excel export alongside HTML
-- Diff reports (compare two snapshots of the same session over time)
-- Scheduled/automated runs (e.g., daily session status emails)
-- Web-based version (Flask/FastAPI) instead of CLI+HTML
-- Integration with UCSC PPDO project tracking systems
-- Support for Studio Projects (not just Sessions)
-- Markup detail view (content of markups, not just counts)
+The app version is defined in `src/redline_radar/__init__.py`:
+```python
+__version__ = "0.1.0"
+```
+
+This version string is:
+- Displayed in the CLI banner on launch
+- Included in the HTML report footer
+- Included in the report `<title>` tag
+- Used in the PyInstaller exe metadata
+
+The version follows [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATCH`. Bump the version in `__init__.py` before building a new exe for distribution. The `pyproject.toml` version should be kept in sync.
