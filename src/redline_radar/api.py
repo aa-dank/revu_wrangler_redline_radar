@@ -4,15 +4,27 @@ Data fetching and aggregation layer for Bluebeam Studio Sessions.
 This module handles:
   - Fetching session metadata
   - Building the attendance list from session activities
-  - Building per-file markup summaries
+  - Building per-file markup summaries from the activity log
 
 Where the ``revu_wrangler`` SDK doesn't yet have a method, we fall back
-to raw HTTP requests using the client's ``http`` handle (the same pattern
-used in ``development/explore_activities.py``).
+to raw HTTP requests using the client's ``http`` handle.
+
+**API response conventions** (discovered via live testing 2026-03-13):
+  - Envelope keys use Pascal-case prefixed with "Session":
+    ``SessionActivities``, ``SessionUsers``, ``Files``, etc.
+  - Most envelopes include a ``TotalCount`` field.
+  - Activities paginate at 100 items per page; use ``?start=N`` to page.
+  - Each activity has ``Id``, ``DocumentId``, ``UserId``, ``Message``,
+    ``Created`` — there is *no* ``Type`` field; the ``Message`` string
+    describes the action (e.g. ``"Joined Session"``, ``"Added Callout"``).
+  - ``UserId`` is a numeric integer, not an email or name.
+  - The ``/sessions/{id}/markups`` endpoint does **not** exist (404).
+    Markup data must instead be derived from the activities feed.
 """
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from revu_wrangler import BluebeamClient
@@ -26,6 +38,25 @@ SessionInfo = dict[str, Any]
 AttendeeRecord = dict[str, Any]
 FileMarkupSummary = dict[str, Any]
 AuthorStats = dict[str, Any]
+
+
+# ---------------------------------------------------------------------------
+# Activity message patterns
+# ---------------------------------------------------------------------------
+
+# Messages that indicate a user joined the session
+_JOIN_MESSAGES = {"joined session"}
+
+# Messages that indicate a markup was *added* (not edited, moved, or deleted).
+# Pattern: "Added <markup-type>" or "Add <markup-type>"
+_ADDED_PATTERN = re.compile(r"^(?:Added|Add)\s+(.+)$", re.IGNORECASE)
+
+# Messages to exclude from markup-added counting even if they match the
+# pattern above (file additions are not markups).
+_ADDED_EXCLUSION_PATTERN = re.compile(r"^Added\s+'.*'$", re.IGNORECASE)
+
+# Default page size returned by the activities endpoint.
+_ACTIVITIES_PAGE_SIZE = 100
 
 
 # ---------------------------------------------------------------------------
@@ -54,48 +85,24 @@ def fetch_session_files(
     """
     Return the list of files in a session.
 
-    The SDK's ``list_files()`` returns an envelope like
-    ``{"Files": [...]}`` or a bare list.
-
     Returns:
         List of file dicts, each with at least ``Id`` and ``Name``.
     """
     resp = client.sessions.list_files(session_id)
-    return _extract_list(resp, ["Files", "files", "Items", "items"])
+    return _extract_list(resp, ["Files", "files", "SessionFiles", "Items", "items"])
 
 
 # ---------------------------------------------------------------------------
-# Attendance from activities
+# Users listing (for name resolution)
 # ---------------------------------------------------------------------------
-
-def _fetch_activities_raw(
-    client: BluebeamClient, session_id: str
-) -> list[dict[str, Any]]:
-    """
-    Fetch all session activities, using raw HTTP as a fallback.
-
-    The activities endpoint may not be wrapped by the SDK yet.
-    """
-    try:
-        resp = client.sessions.list_activities(session_id)  # type: ignore[attr-defined]
-    except AttributeError:
-        # SDK method does not exist yet — raw HTTP fallback
-        url = f"{client.base_url}/publicapi/v1/sessions/{session_id}/activities"
-        http_resp = client.http.get(url)
-        http_resp.raise_for_status()
-        resp = http_resp.json()
-
-    return _extract_list(
-        resp,
-        ["Activities", "activities", "Items", "items", "Records", "records"],
-    )
-
 
 def _fetch_users_raw(
     client: BluebeamClient, session_id: str
 ) -> list[dict[str, Any]]:
     """
-    Fetch the user/attendee list for a session (raw HTTP fallback).
+    Fetch the user/attendee list for a session.
+
+    The API response envelope key is ``SessionUsers``.
     """
     try:
         resp = client.sessions.list_users(session_id)  # type: ignore[attr-defined]
@@ -105,8 +112,97 @@ def _fetch_users_raw(
         http_resp.raise_for_status()
         resp = http_resp.json()
 
-    return _extract_list(resp, ["Users", "users", "Items", "items"])
+    return _extract_list(resp, ["SessionUsers", "Users", "users", "Items", "items"])
 
+
+def _build_user_lookup(
+    client: BluebeamClient, session_id: str
+) -> dict[int, dict[str, str]]:
+    """
+    Build a ``{UserId: {"name": ..., "email": ...}}`` lookup from the
+    session users list.
+    """
+    users = _fetch_users_raw(client, session_id)
+    lookup: dict[int, dict[str, str]] = {}
+    for u in users:
+        uid = u.get("Id") or u.get("id") or u.get("UserId")
+        if uid is None:
+            continue
+        uid = int(uid)
+        name = (
+            u.get("Name")
+            or u.get("name")
+            or u.get("DisplayName")
+            or u.get("Email")
+            or u.get("email")
+            or str(uid)
+        )
+        email = u.get("Email") or u.get("email") or ""
+        lookup[uid] = {"name": name, "email": email}
+    return lookup
+
+
+# ---------------------------------------------------------------------------
+# Activities (with pagination)
+# ---------------------------------------------------------------------------
+
+def _fetch_all_activities(
+    client: BluebeamClient, session_id: str
+) -> list[dict[str, Any]]:
+    """
+    Fetch *all* session activities, handling pagination.
+
+    The API returns up to 100 activities per page.  The response includes
+    a ``TotalCount`` field indicating the total number of activities.
+    We page through using ``?start=N`` until we have them all.
+    """
+    all_activities: list[dict[str, Any]] = []
+    start = 0
+
+    while True:
+        try:
+            resp = client.sessions.list_activities(  # type: ignore[attr-defined]
+                session_id, start=start
+            )
+        except (AttributeError, TypeError):
+            # SDK method doesn't exist or doesn't accept start — raw HTTP
+            url = f"{client.base_url}/publicapi/v1/sessions/{session_id}/activities"
+            params: dict[str, Any] = {}
+            if start > 0:
+                params["start"] = start
+            http_resp = client.http.get(url, params=params)
+            http_resp.raise_for_status()
+            resp = http_resp.json()
+
+        page = _extract_list(
+            resp, ["SessionActivities", "Activities", "activities", "Items", "items"]
+        )
+        if not page:
+            break
+
+        all_activities.extend(page)
+
+        # Check if we have all items
+        total_count = (
+            resp.get("TotalCount")
+            if isinstance(resp, dict)
+            else None
+        )
+        if total_count is not None and len(all_activities) >= int(total_count):
+            break
+
+        # If this page was smaller than the page size, we're done
+        if len(page) < _ACTIVITIES_PAGE_SIZE:
+            break
+
+        start += len(page)
+
+    return all_activities
+
+
+# ---------------------------------------------------------------------------
+# Attendance from activities
+# ---------------------------------------------------------------------------
 
 def build_attendance(
     client: BluebeamClient, session_id: str
@@ -114,151 +210,89 @@ def build_attendance(
     """
     Build the attendance list: one record per user who has entered the session.
 
-    Primary strategy: parse the activities feed for join events and take the
-    *first* join timestamp per user.
-
-    Fallback: if activities can't provide join timestamps, use the users list
-    (which at minimum tells us who is in the session, even without timestamps).
+    Uses the activities feed to find "Joined Session" events, then resolves
+    user IDs to names/emails via the session users endpoint.
 
     Returns:
         Sorted list of dicts with ``name``, ``email``, ``first_seen`` keys.
     """
+    # Fetch the users list for name resolution
+    user_lookup = _build_user_lookup(client, session_id)
+
+    # Fetch all activities
     try:
-        activities = _fetch_activities_raw(client, session_id)
-        attendance = _attendance_from_activities(activities)
+        activities = _fetch_all_activities(client, session_id)
+    except Exception:
+        activities = []
+
+    if activities:
+        attendance = _attendance_from_activities(activities, user_lookup)
         if attendance:
             return attendance
-    except Exception:
-        pass
 
-    # Fallback — users list without timestamps
-    try:
-        users = _fetch_users_raw(client, session_id)
-        return _attendance_from_users(users)
-    except Exception:
-        return []
+    # Fallback — users list without join timestamps
+    if user_lookup:
+        return _attendance_from_user_lookup(user_lookup)
+
+    return []
 
 
 def _attendance_from_activities(
     activities: list[dict[str, Any]],
+    user_lookup: dict[int, dict[str, str]],
 ) -> list[AttendeeRecord]:
     """
-    Extract the first join event per user from an activities list.
+    Extract the first "Joined Session" event per user from the activities list.
 
-    Handles multiple possible field names since the exact schema is
-    not fully documented.
+    The actual API schema uses:
+      - ``Message``: free-text string like ``"Joined Session"``
+      - ``UserId``: integer user identifier
+      - ``Created``: ISO-8601 timestamp
     """
-    # Identify the type field
-    type_field = _find_field(
-        activities, ["Type", "type", "ActivityType", "activityType", "Action", "action"]
-    )
-    # Identify user field
-    user_field = _find_field(
-        activities, ["User", "user", "Email", "email", "Actor", "actor"]
-    )
-    # Identify name field
-    name_field = _find_field(
-        activities, ["UserName", "userName", "Name", "name", "ActorName", "actorName"]
-    )
-    # Identify timestamp field
-    time_field = _find_field(
-        activities,
-        ["Timestamp", "timestamp", "Created", "created", "Date", "date", "When", "when"],
-    )
+    first_seen: dict[int, AttendeeRecord] = {}
 
-    if not type_field or not time_field:
-        return []
-
-    # Join-type values to look for (case-insensitive comparison)
-    join_types = {"userjoined", "join", "joined", "user_joined", "sessionjoin"}
-
-    first_seen: dict[str, AttendeeRecord] = {}
     for activity in activities:
-        activity_type = str(activity.get(type_field, "")).lower().strip()
-        if activity_type not in join_types:
+        message = str(activity.get("Message", "")).strip().lower()
+        if message not in _JOIN_MESSAGES:
             continue
 
-        user_key = activity.get(user_field or "User") or activity.get("Email", "")
-        if not user_key:
+        user_id = activity.get("UserId")
+        if user_id is None:
             continue
+        user_id = int(user_id)
 
-        timestamp = activity.get(time_field, "")
-        user_name = activity.get(name_field or "UserName", user_key)
+        created = activity.get("Created", "")
 
-        if user_key not in first_seen or (
-            timestamp and timestamp < first_seen[user_key]["first_seen"]
+        if user_id not in first_seen or (
+            created and created < first_seen[user_id]["first_seen"]
         ):
-            first_seen[user_key] = {
-                "name": user_name,
-                "email": str(user_key),
-                "first_seen": timestamp or "N/A",
+            user_info = user_lookup.get(user_id, {})
+            first_seen[user_id] = {
+                "name": user_info.get("name", str(user_id)),
+                "email": user_info.get("email", ""),
+                "first_seen": created or "N/A",
             }
 
     return sorted(first_seen.values(), key=lambda x: str(x.get("first_seen", "")))
 
 
-def _attendance_from_users(
-    users: list[dict[str, Any]],
+def _attendance_from_user_lookup(
+    user_lookup: dict[int, dict[str, str]],
 ) -> list[AttendeeRecord]:
     """Fallback: build attendance from the users list (no timestamps)."""
     records: list[AttendeeRecord] = []
-    for user in users:
-        name = (
-            user.get("Name")
-            or user.get("name")
-            or user.get("Email")
-            or user.get("email")
-            or "Unknown"
-        )
-        email = user.get("Email") or user.get("email") or ""
+    for _uid, info in user_lookup.items():
         records.append({
-            "name": name,
-            "email": email,
+            "name": info.get("name", "Unknown"),
+            "email": info.get("email", ""),
             "first_seen": "N/A",
         })
     return sorted(records, key=lambda x: x.get("name", "").lower())
 
 
 # ---------------------------------------------------------------------------
-# Markup summary per file
+# Markup summary per file — derived from activities
 # ---------------------------------------------------------------------------
-
-def _fetch_markups_for_file(
-    client: BluebeamClient, session_id: str, file_id: str
-) -> list[dict[str, Any]]:
-    """
-    Fetch markups for a single file in a session.
-
-    The markup endpoint is Beta and may not be in the SDK.
-    We try the SDK method first, then fall back to raw HTTP with
-    several candidate URL patterns.
-    """
-    # Try SDK method
-    try:
-        resp = client.sessions.list_markups(session_id, file_id)  # type: ignore[attr-defined]
-        return _extract_list(resp, ["Markups", "markups", "Items", "items"])
-    except AttributeError:
-        pass
-
-    # Raw HTTP fallback — try candidate URL patterns
-    candidate_urls = [
-        f"{client.base_url}/publicapi/v1/sessions/{session_id}/files/{file_id}/markups",
-        f"{client.base_url}/publicapi/v1/sessions/{session_id}/markups",
-    ]
-
-    for url in candidate_urls:
-        try:
-            http_resp = client.http.get(url)
-            if http_resp.status_code == 200:
-                resp = http_resp.json()
-                return _extract_list(
-                    resp, ["Markups", "markups", "Items", "items", "Data", "data"]
-                )
-        except Exception:
-            continue
-
-    return []
-
 
 def build_markup_summary(
     client: BluebeamClient,
@@ -268,7 +302,14 @@ def build_markup_summary(
     on_progress: Any | None = None,
 ) -> list[FileMarkupSummary]:
     """
-    For each file in the session, fetch markups and aggregate by author.
+    For each file in the session, summarise markup activity from the activity
+    log, grouped by user.
+
+    Since the ``/sessions/{id}/markups`` endpoint does not exist (404),
+    we derive markup information from the activities feed.  An activity
+    counts as a "markup added" when its ``Message`` matches patterns like
+    ``"Added Callout"``, ``"Add Cloud+"``, etc.  Each activity also carries
+    a ``DocumentId`` linking it to a specific file.
 
     Args:
         client: Authenticated BluebeamClient.
@@ -283,45 +324,63 @@ def build_markup_summary(
           - ``file_id``: file ID
           - ``markup_authors``: list of ``{name, count, latest_date}``
     """
+    # Fetch the users list for name resolution
+    user_lookup = _build_user_lookup(client, session_id)
+
+    # Fetch all activities once (already paginated)
+    try:
+        all_activities = _fetch_all_activities(client, session_id)
+    except Exception:
+        all_activities = []
+
+    # Index activities by DocumentId for fast lookup
+    activities_by_doc: dict[int, list[dict[str, Any]]] = {}
+    for activity in all_activities:
+        doc_id = activity.get("DocumentId")
+        if doc_id is not None and int(doc_id) != -1:
+            activities_by_doc.setdefault(int(doc_id), []).append(activity)
+
     result: list[FileMarkupSummary] = []
 
     for file_info in files:
         file_id = str(file_info.get("Id", file_info.get("id", "")))
         file_name = file_info.get("Name", file_info.get("name", f"File {file_id}"))
 
-        try:
-            markups = _fetch_markups_for_file(client, session_id, file_id)
-        except Exception:
-            # Beta endpoint failure — degrade gracefully
-            markups = []
+        # Find markup-add activities for this file
+        file_activities = activities_by_doc.get(int(file_id), []) if file_id else []
+        author_stats: dict[int, AuthorStats] = {}
 
-        author_stats: dict[str, AuthorStats] = {}
-        for markup in markups:
-            author = (
-                markup.get("Author")
-                or markup.get("author")
-                or markup.get("AuthorEmail")
-                or "Unknown"
-            )
-            date = (
-                markup.get("Date")
-                or markup.get("date")
-                or markup.get("ModifiedDate")
-                or markup.get("modifiedDate")
-                or ""
-            )
-            if author not in author_stats:
-                author_stats[author] = {
-                    "name": author,
+        for activity in file_activities:
+            message = str(activity.get("Message", ""))
+
+            # Is this an "Added <markup>" or "Add <markup>" event?
+            if not _ADDED_PATTERN.match(message):
+                continue
+            # Exclude file additions like "Added 'filename.pdf'"
+            if _ADDED_EXCLUSION_PATTERN.match(message):
+                continue
+
+            user_id = activity.get("UserId")
+            if user_id is None:
+                continue
+            user_id = int(user_id)
+
+            created = activity.get("Created", "")
+            user_info = user_lookup.get(user_id, {})
+            author_name = user_info.get("name", str(user_id))
+
+            if user_id not in author_stats:
+                author_stats[user_id] = {
+                    "name": author_name,
                     "count": 0,
-                    "latest_date": date,
+                    "latest_date": created,
                 }
-            author_stats[author]["count"] += 1
-            if date and (
-                not author_stats[author]["latest_date"]
-                or date > author_stats[author]["latest_date"]
+            author_stats[user_id]["count"] += 1
+            if created and (
+                not author_stats[user_id]["latest_date"]
+                or created > author_stats[user_id]["latest_date"]
             ):
-                author_stats[author]["latest_date"] = date
+                author_stats[user_id]["latest_date"] = created
 
         result.append({
             "name": file_name,
@@ -359,19 +418,3 @@ def _extract_list(
                 return resp[key]
 
     return []
-
-
-def _find_field(
-    items: list[dict[str, Any]], candidates: list[str]
-) -> str | None:
-    """
-    Given a list of dicts, find which of the candidate field names
-    is actually present in the first item.
-    """
-    if not items:
-        return None
-    first = items[0]
-    for name in candidates:
-        if name in first:
-            return name
-    return None
