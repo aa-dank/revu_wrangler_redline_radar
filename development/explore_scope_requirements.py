@@ -116,7 +116,7 @@ def _test_scope(scope_label: str, scopes: list[str], session_id: str) -> dict:
     for label, url in endpoints:
         print(f"\n  Testing: {label}")
         result = _test_endpoint(client, label, url)
-        status = "✔ OK" if result["success"] else f"✘ {result.get('status_code', 'ERR')}"
+        status = "OK" if result["success"] else f"ERROR {result.get('status_code', 'ERR')}"
         print(f"    {status}")
         if not result["success"] and result.get("error"):
             print(f"    Error: {result['error'][:200]}")
@@ -193,23 +193,23 @@ def main():
 
     for ep_read, ep_full in zip(result_read["endpoints"], result_full["endpoints"]):
         label = ep_read["endpoint"]
-        read_status = "✔ OK" if ep_read["success"] else f"✘ {ep_read.get('status_code', 'ERR')}"
-        full_status = "✔ OK" if ep_full["success"] else f"✘ {ep_full.get('status_code', 'ERR')}"
+        read_status = "OK" if ep_read["success"] else f"ERROR {ep_read.get('status_code', 'ERR')}"
+        full_status = "OK" if ep_full["success"] else f"ERROR {ep_full.get('status_code', 'ERR')}"
         print(f"  {label:<40} {read_status:<15} {full_status:<15}")
 
     # Recommendation
     print()
     if result_read["all_passed"]:
         recommendation = "read_prime is SUFFICIENT — use least-privilege scope."
-        print(f"  ✔ RECOMMENDATION: {recommendation}")
+        print(f"  RECOMMENDATION: {recommendation}")
     elif result_full["all_passed"]:
         recommendation = "full_user is REQUIRED — read_prime was denied for some endpoints."
         failed = [e["endpoint"] for e in result_read["endpoints"] if not e["success"]]
-        print(f"  ✘ RECOMMENDATION: {recommendation}")
+        print(f"  RECOMMENDATION: {recommendation}")
         print(f"    Endpoints that failed with read_prime: {failed}")
     else:
         recommendation = "NEITHER scope worked for all endpoints — check API access and session membership."
-        print(f"  ⚠ RECOMMENDATION: {recommendation}")
+        print(f"  RECOMMENDATION: {recommendation}")
 
     # -----------------------------------------------------------------------
     # Save summary

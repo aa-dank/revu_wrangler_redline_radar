@@ -197,7 +197,7 @@ def _run_oauth_flow(client: BluebeamClient) -> None:
         refresh_token=token.refresh_token,
         expires_in=token.expires_in,
     )
-    print(f"  ✔ Authorized successfully")
+    print("  OK Authorized successfully")
 
 
 # ---------------------------------------------------------------------------
@@ -237,7 +237,7 @@ def get_authenticated_client(scopes: list[str] | None = None) -> BluebeamClient:
             )
             # Token refresh is handled automatically by the client's auth hook
             # on the next API call if the token is expired.
-            print("  ✔ Using saved tokens")
+            print("  OK Using saved tokens")
             return client
         except Exception as e:
             print(f"  Saved tokens invalid ({e}), re-authenticating...")
