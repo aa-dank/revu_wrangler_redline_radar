@@ -1,114 +1,97 @@
 """
-Application configuration, path resolution, and credential loading.
+Configuration management for Redline Radar.
 
-Resolution order for `.env`:
-  1. Adjacent to the executable (PyInstaller builds)
-  2. Current working directory
-  3. Project root (fallback for development)
+Handles loading credentials from environment variables and/or a ``.env``
+file, and exposes a ``validate_credentials()`` helper that raises
+``ConfigurationError`` with actionable guidance if required values are
+missing.
 
-Required environment variables:
-  - BLUEBEAM_CLIENT_ID
-  - BLUEBEAM_CLIENT_SECRET
+Required environment variables
+-------------------------------
+``BLUEBEAM_CLIENT_ID``
+    OAuth application client ID.
+``BLUEBEAM_CLIENT_SECRET``
+    OAuth application client secret.
 
-Optional (with defaults):
-  - BLUEBEAM_REDIRECT_URI  (default: http://localhost:5000/callback)
-  - BLUEBEAM_REGION         (default: US)
+Optional environment variables
+-------------------------------
+``BLUEBEAM_AUTH_URL``
+    Override the OAuth authorisation endpoint
+    (default: ``https://authserver.bluebeam.com/auth/oauth/authorize``).
+``BLUEBEAM_TOKEN_URL``
+    Override the token exchange endpoint
+    (default: ``https://authserver.bluebeam.com/auth/oauth/token``).
+``BLUEBEAM_REDIRECT_URI``
+    Override the local callback URI used during the OAuth flow
+    (default: ``http://localhost:8765/callback``).
+``BLUEBEAM_SCOPE``
+    Space-separated OAuth scopes to request
+    (default: ``read_prime``).
 """
 
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
 
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover
+    load_dotenv = None  # type: ignore[assignment]
 
 
 # ---------------------------------------------------------------------------
-# .env resolution
+# Load .env (optional)
 # ---------------------------------------------------------------------------
 
-def _find_and_load_dotenv() -> None:
-    """Search for a .env file in priority order and load the first one found."""
-    candidates: list[Path] = []
+_ENV_FILE = Path(".env")
 
-    # 1. Adjacent to the executable (PyInstaller frozen bundle)
-    if getattr(sys, "frozen", False):
-        candidates.append(Path(sys._MEIPASS) / ".env")  # type: ignore[attr-defined]
-        candidates.append(Path(sys.executable).parent / ".env")
+if load_dotenv is not None and _ENV_FILE.exists():
+    load_dotenv(_ENV_FILE, override=False)
 
-    # 2. Current working directory
-    candidates.append(Path.cwd() / ".env")
-
-    # 3. Project root — walk up from this file until we find pyproject.toml
-    current = Path(__file__).resolve().parent
-    for _i in range(5):
-        candidate = current / ".env"
-        candidates.append(candidate)
-        if (current / "pyproject.toml").exists():
-            break
-        current = current.parent
-
-    for env_path in candidates:
-        if env_path.is_file():
-            load_dotenv(env_path, override=False)
-            return
-
-    # No .env found — variables may still be set in the environment
-    load_dotenv(override=False)
-
-
-_find_and_load_dotenv()
 
 # ---------------------------------------------------------------------------
-# Credential constants
+# Constants / defaults
 # ---------------------------------------------------------------------------
 
-BLUEBEAM_CLIENT_ID: str | None = os.environ.get("BLUEBEAM_CLIENT_ID")
-BLUEBEAM_CLIENT_SECRET: str | None = os.environ.get("BLUEBEAM_CLIENT_SECRET")
-BLUEBEAM_REDIRECT_URI: str = os.environ.get(
-    "BLUEBEAM_REDIRECT_URI", "http://localhost:5000/callback"
-)
-BLUEBEAM_REGION: str = os.environ.get("BLUEBEAM_REGION", "US")
+DEFAULT_AUTH_URL = "https://authserver.bluebeam.com/auth/oauth/authorize"
+DEFAULT_TOKEN_URL = "https://authserver.bluebeam.com/auth/oauth/token"
+DEFAULT_REDIRECT_URI = "http://localhost:8765/callback"
+DEFAULT_SCOPE = "read_prime"
+
 
 # ---------------------------------------------------------------------------
-# Path constants
+# Public accessors
 # ---------------------------------------------------------------------------
 
-#: Directory for persisted OAuth tokens.
-TOKEN_DIR: Path = Path.home() / ".redline_radar"
+def get_client_id() -> str:
+    """Return the Bluebeam OAuth client ID from the environment."""
+    return os.environ.get("BLUEBEAM_CLIENT_ID", "")
 
-#: Full path to the saved token file.
-TOKEN_FILE: Path = TOKEN_DIR / "tokens.json"
 
-#: Default output directory for generated reports.
-OUTPUT_DIR: Path = Path.home() / "Downloads"
+def get_client_secret() -> str:
+    """Return the Bluebeam OAuth client secret from the environment."""
+    return os.environ.get("BLUEBEAM_CLIENT_SECRET", "")
 
-# ---------------------------------------------------------------------------
-# Defaults
-# ---------------------------------------------------------------------------
 
-#: OAuth scopes requested.
-DEFAULT_SCOPES: list[str] = ["full_user", "offline_access"]
+def get_auth_url() -> str:
+    """Return the OAuth authorisation endpoint URL."""
+    return os.environ.get("BLUEBEAM_AUTH_URL", DEFAULT_AUTH_URL)
 
-#: How long to wait for the user to complete OAuth in the browser (seconds).
-AUTH_TIMEOUT_SECONDS: int = 120
 
-#: Port for the local OAuth callback server.
-CALLBACK_PORT: int = 5000
+def get_token_url() -> str:
+    """Return the OAuth token exchange endpoint URL."""
+    return os.environ.get("BLUEBEAM_TOKEN_URL", DEFAULT_TOKEN_URL)
 
-# ---------------------------------------------------------------------------
-# Template path resolution
-# ---------------------------------------------------------------------------
 
-def get_template_dir() -> Path:
-    """Resolve the Jinja2 template directory for both dev and PyInstaller contexts."""
-    if getattr(sys, "frozen", False):
-        # Running as a PyInstaller bundle
-        return Path(sys._MEIPASS) / "redline_radar" / "templates"  # type: ignore[attr-defined]
-    else:
-        # Running from source
-        return Path(__file__).parent / "templates"
+def get_redirect_uri() -> str:
+    """Return the local OAuth callback URI."""
+    return os.environ.get("BLUEBEAM_REDIRECT_URI", DEFAULT_REDIRECT_URI)
+
+
+def get_scope() -> str:
+    """Return the OAuth scope string."""
+    return os.environ.get("BLUEBEAM_SCOPE", DEFAULT_SCOPE)
 
 
 # ---------------------------------------------------------------------------
@@ -116,25 +99,32 @@ def get_template_dir() -> Path:
 # ---------------------------------------------------------------------------
 
 class ConfigurationError(Exception):
-    """Raised when required configuration is missing."""
+    """Raised when required configuration values are missing or invalid."""
 
 
 def validate_credentials() -> None:
     """
-    Verify that required Bluebeam credentials are present.
+    Raise ``ConfigurationError`` if required credentials are not set.
 
-    Raises:
-        ConfigurationError: If BLUEBEAM_CLIENT_ID or BLUEBEAM_CLIENT_SECRET
-            are not set.
+    Checks:
+      - ``BLUEBEAM_CLIENT_ID`` is non-empty
+      - ``BLUEBEAM_CLIENT_SECRET`` is non-empty
+
+    The error message includes actionable guidance for the user.
     """
     missing: list[str] = []
-    if not BLUEBEAM_CLIENT_ID:
+
+    if not get_client_id():
         missing.append("BLUEBEAM_CLIENT_ID")
-    if not BLUEBEAM_CLIENT_SECRET:
+    if not get_client_secret():
         missing.append("BLUEBEAM_CLIENT_SECRET")
+
     if missing:
+        vars_str = ", ".join(missing)
         raise ConfigurationError(
-            f"Missing Bluebeam credentials: {', '.join(missing)}.\n"
-            "Expected a .env file with BLUEBEAM_CLIENT_ID and BLUEBEAM_CLIENT_SECRET.\n"
-            "See README for setup instructions."
+            f"Missing required environment variable(s): {vars_str}.\n"
+            "  Set them in your shell or in a .env file in the project root.\n"
+            "  Example:\n"
+            "    BLUEBEAM_CLIENT_ID=your-client-id\n"
+            "    BLUEBEAM_CLIENT_SECRET=your-client-secret"
         )

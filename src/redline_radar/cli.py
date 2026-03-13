@@ -23,7 +23,7 @@ import click
 from rich.align import Align
 from rich.console import Console
 from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+
 from rich.table import Table
 
 from redline_radar import __version__
@@ -333,6 +333,10 @@ def _collect_data(client, session_id: str):
     """
     Fetch attendance and markup data.
 
+    Markup data is now derived from the activities feed (the dedicated
+    markups endpoint does not exist).  Activities are fetched with
+    pagination and indexed by DocumentId.
+
     Returns:
         Tuple of (attendance_list, markup_summary_list, markup_error_message_or_None).
     """
@@ -340,8 +344,8 @@ def _collect_data(client, session_id: str):
     markup_summary: list = []
     markup_error: str | None = None
 
-    # Attendance
-    with console.status("[bold green]Fetching session attendees...", spinner="dots"):
+    # Attendance (fetches activities + users internally)
+    with console.status("[bold green]Fetching session data...", spinner="dots"):
         try:
             attendance = build_attendance(client, session_id)
         except Exception as exc:
@@ -351,7 +355,7 @@ def _collect_data(client, session_id: str):
         f"[bold green]\u2714[/bold green] Attendance: {len(attendance)} user(s) found."
     )
 
-    # Files + markups
+    # Files + markup summary (derived from activities)
     try:
         with console.status("[bold green]Fetching session files...", spinner="dots"):
             files = fetch_session_files(client, session_id)
@@ -361,20 +365,11 @@ def _collect_data(client, session_id: str):
         )
 
         if files:
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[bold green]{task.description}"),
-                BarColumn(),
-                TaskProgressColumn(),
-                console=console,
-            ) as progress:
-                task = progress.add_task("Fetching markups...", total=len(files))
-
-                def advance():
-                    progress.advance(task)
-
+            with console.status(
+                "[bold green]Analysing markup activity...", spinner="dots"
+            ):
                 markup_summary = build_markup_summary(
-                    client, session_id, files, on_progress=advance
+                    client, session_id, files
                 )
 
             console.print("[bold green]\u2714[/bold green] Markup data collected.")
@@ -382,11 +377,14 @@ def _collect_data(client, session_id: str):
     except Exception as exc:
         markup_error = str(exc)
         # Still return whatever attendance we have
-        # Build a minimal file list for the report (names only, no markups)
         try:
             files = fetch_session_files(client, session_id)
             markup_summary = [
-                {"name": f.get("Name", f"File {f.get('Id', '?')}"), "file_id": str(f.get("Id", "")), "markup_authors": []}
+                {
+                    "name": f.get("Name", f"File {f.get('Id', '?')}"),
+                    "file_id": str(f.get("Id", "")),
+                    "markup_authors": [],
+                }
                 for f in files
             ]
         except Exception:
@@ -400,28 +398,17 @@ def _collect_data(client, session_id: str):
 # ---------------------------------------------------------------------------
 
 def _handle_api_error(exc: Exception, session_id: str) -> None:
-    """Display a user-friendly error message for API failures."""
-    from revu_wrangler import NotFoundError, AuthorizationError, RateLimitError
-
-    if isinstance(exc, NotFoundError):
+    """Print a user-friendly error message for API errors."""
+    msg = str(exc)
+    if "404" in msg or "not found" in msg.lower():
         console.print(
-            f"[bold red]\u2716 Session {session_id} not found.[/bold red]\n"
-            "  Check the ID and ensure you have access to this session."
+            f"[bold red]\u2716 Session not found:[/bold red] {session_id}\n"
+            "[dim]  Check the Session ID and try again.[/dim]"
         )
-    elif isinstance(exc, AuthorizationError):
+    elif "401" in msg or "403" in msg or "unauthorized" in msg.lower():
         console.print(
-            "[bold red]\u2716 Authorization error.[/bold red]\n"
-            "  Your token may have expired. Try restarting the app to re-authenticate."
-        )
-    elif isinstance(exc, RateLimitError):
-        console.print(
-            "[bold yellow]\u26a0 Rate limited by Bluebeam API.[/bold yellow]\n"
-            "  Please wait a moment and try again."
-        )
-    elif "connection" in str(exc).lower() or "network" in str(exc).lower():
-        console.print(
-            "[bold red]\u2716 Network error \u2014 could not connect to Bluebeam API.[/bold red]\n"
-            "  Check your internet connection and try again."
+            "[bold red]\u2716 Authentication error.[/bold red]\n"
+            "[dim]  Your session may have expired. Restart the app to re-authenticate.[/dim]"
         )
     else:
-        console.print(f"[bold red]\u2716 Error fetching session:[/bold red] {exc}")
+        console.print(f"[bold red]\u2716 Failed to fetch session:[/bold red] {exc}")
