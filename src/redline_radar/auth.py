@@ -169,6 +169,9 @@ def run_oauth_flow(client: BluebeamClient) -> None:
     parsed_uri = urlparse(BLUEBEAM_REDIRECT_URI)
     port = parsed_uri.port or CALLBACK_PORT
 
+    # Diagnostic: show the exact redirect URI used in the auth request.
+    print(f"OAuth redirect URI: {BLUEBEAM_REDIRECT_URI}")
+
     # Start callback server in a background thread
     server = HTTPServer(("127.0.0.1", port), _CallbackHandler)
     server.timeout = AUTH_TIMEOUT_SECONDS

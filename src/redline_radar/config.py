@@ -23,7 +23,7 @@ Optional environment variables
     (default: ``https://authserver.bluebeam.com/auth/oauth/token``).
 ``BLUEBEAM_REDIRECT_URI``
     Override the local callback URI used during the OAuth flow
-    (default: ``http://localhost:8765/callback``).
+    (default: ``http://localhost:5000/callback``).
 ``BLUEBEAM_SCOPE``
     Space-separated OAuth scopes to request
     (default: ``read_prime``).
@@ -32,7 +32,9 @@ Optional environment variables
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 try:
     from dotenv import load_dotenv
@@ -44,10 +46,38 @@ except ImportError:  # pragma: no cover
 # Load .env (optional)
 # ---------------------------------------------------------------------------
 
-_ENV_FILE = Path(".env")
+def _candidate_env_files() -> list[Path]:
+    """Return likely .env locations for source and bundled executions."""
+    candidates: list[Path] = []
 
-if load_dotenv is not None and _ENV_FILE.exists():
-    load_dotenv(_ENV_FILE, override=False)
+    # Current working directory (typical local development run).
+    candidates.append(Path.cwd() / ".env")
+
+    # Project root relative to this source file: src/redline_radar/config.py -> root.
+    candidates.append(Path(__file__).resolve().parents[2] / ".env")
+
+    # Directory containing the executable/script.
+    candidates.append(Path(sys.executable).resolve().parent / ".env")
+
+    # PyInstaller extraction directory (when bundled with --add-data).
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(Path(meipass) / ".env")
+
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for path in candidates:
+        key = str(path)
+        if key not in seen:
+            seen.add(key)
+            unique.append(path)
+    return unique
+
+
+if load_dotenv is not None:
+    for env_path in _candidate_env_files():
+        if env_path.exists():
+            load_dotenv(env_path, override=False)
 
 
 # ---------------------------------------------------------------------------
@@ -56,8 +86,16 @@ if load_dotenv is not None and _ENV_FILE.exists():
 
 DEFAULT_AUTH_URL = "https://authserver.bluebeam.com/auth/oauth/authorize"
 DEFAULT_TOKEN_URL = "https://authserver.bluebeam.com/auth/oauth/token"
-DEFAULT_REDIRECT_URI = "http://localhost:8765/callback"
+DEFAULT_REDIRECT_URI = "http://localhost:5000/callback"
 DEFAULT_SCOPE = "read_prime"
+
+
+def _int_env(name: str, default: int) -> int:
+    """Read an integer environment variable with a safe fallback."""
+    try:
+        return int(os.environ.get(name, str(default)))
+    except ValueError:
+        return default
 
 
 # ---------------------------------------------------------------------------
@@ -92,6 +130,45 @@ def get_redirect_uri() -> str:
 def get_scope() -> str:
     """Return the OAuth scope string."""
     return os.environ.get("BLUEBEAM_SCOPE", DEFAULT_SCOPE)
+
+
+# ---------------------------------------------------------------------------
+# Backward-compatible exported settings
+# ---------------------------------------------------------------------------
+
+# Some modules import these as constants. Keep them available while loading
+# from the same .env/environment source.
+BLUEBEAM_CLIENT_ID = get_client_id()
+BLUEBEAM_CLIENT_SECRET = get_client_secret()
+BLUEBEAM_REDIRECT_URI = get_redirect_uri()
+BLUEBEAM_REGION = os.environ.get("BLUEBEAM_REGION", "US")
+
+DEFAULT_SCOPES = [scope for scope in get_scope().split() if scope]
+
+TOKEN_DIR = Path.home() / ".redline_radar"
+TOKEN_FILE = TOKEN_DIR / "tokens.json"
+
+OUTPUT_DIR = Path.home() / "Downloads"
+if not OUTPUT_DIR.exists():
+    OUTPUT_DIR = Path.home()
+
+AUTH_TIMEOUT_SECONDS = _int_env("BLUEBEAM_AUTH_TIMEOUT_SECONDS", 120)
+CALLBACK_PORT = urlparse(BLUEBEAM_REDIRECT_URI).port or 5000
+
+
+def get_template_dir() -> Path:
+    """Return template directory for source runs and PyInstaller bundles."""
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        bundled = Path(meipass) / "redline_radar" / "templates"
+        if bundled.exists():
+            return bundled
+
+    source = Path(__file__).resolve().parent / "templates"
+    if source.exists():
+        return source
+
+    return source
 
 
 # ---------------------------------------------------------------------------
