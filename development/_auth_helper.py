@@ -85,8 +85,17 @@ def _load_saved_tokens() -> dict | None:
     if TOKEN_FILE.exists():
         try:
             data = json.loads(TOKEN_FILE.read_text())
-            if data.get("access_token"):
-                return data
+            access_token = data.get("access_token")
+            refresh_token = data.get("refresh_token")
+            if not access_token:
+                return None
+
+            expires_in = int(data.get("expires_in", 3600) or 3600)
+            saved_at = float(data.get("saved_at", 0) or 0)
+            if saved_at and (saved_at + expires_in - 30) <= time.time() and not refresh_token:
+                return None
+
+            return data
         except (json.JSONDecodeError, KeyError):
             pass
     return None
@@ -96,10 +105,11 @@ def _save_tokens(access_token: str, refresh_token: str | None, expires_in: int):
     """Persist tokens to disk for reuse."""
     data = {
         "access_token": access_token,
-        "refresh_token": refresh_token,
         "expires_in": expires_in,
         "saved_at": time.time(),
     }
+    if refresh_token:
+        data["refresh_token"] = refresh_token
     TOKEN_FILE.write_text(json.dumps(data, indent=2))
     print(f"  Tokens saved to {TOKEN_FILE}")
 

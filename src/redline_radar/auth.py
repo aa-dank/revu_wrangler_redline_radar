@@ -45,13 +45,25 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 def load_saved_tokens() -> dict | None:
-    """Load tokens from disk if they exist and contain an access_token."""
+    """Load tokens from disk if they are still usable for authentication."""
     if not TOKEN_FILE.exists():
         return None
     try:
         data = json.loads(TOKEN_FILE.read_text(encoding="utf-8"))
-        if data.get("access_token"):
-            return data
+        access_token = data.get("access_token")
+        refresh_token = data.get("refresh_token")
+        if not access_token:
+            return None
+
+        expires_in = int(data.get("expires_in", 3600) or 3600)
+        saved_at = float(data.get("saved_at", 0) or 0)
+        now = time.time()
+        # If token appears expired (with a small safety buffer) and there is
+        # no refresh token, force full OAuth instead of returning stale data.
+        if saved_at and (saved_at + expires_in - 30) <= now and not refresh_token:
+            return None
+
+        return data
     except (json.JSONDecodeError, KeyError, OSError):
         pass
     return None
@@ -66,10 +78,11 @@ def save_tokens(
     TOKEN_DIR.mkdir(parents=True, exist_ok=True)
     data = {
         "access_token": access_token,
-        "refresh_token": refresh_token,
         "expires_in": expires_in,
         "saved_at": time.time(),
     }
+    if refresh_token:
+        data["refresh_token"] = refresh_token
     TOKEN_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
     # Best-effort: restrict file permissions to owner only
@@ -142,6 +155,10 @@ class AuthTimeoutError(Exception):
 
 class AuthFlowError(Exception):
     """Raised when the OAuth flow encounters an error."""
+
+
+class ReauthenticationError(Exception):
+    """Raised when automatic re-authentication cannot recover access."""
 
 
 def run_oauth_flow(client: BluebeamClient) -> None:
@@ -260,3 +277,53 @@ def get_authenticated_client() -> BluebeamClient:
     # Full OAuth flow
     run_oauth_flow(client)
     return client
+
+
+def try_reauthenticate(client: BluebeamClient) -> bool:
+    """
+    Try to recover authentication for an existing client.
+
+    Strategy:
+      1. If a refresh token is available, attempt refresh.
+      2. If refresh fails (or no refresh token), run full OAuth flow.
+
+    Returns:
+        True if the client has a refreshed/new access token.
+    """
+    token = getattr(client.auth, "token", None)
+    refresh_token = getattr(token, "refresh_token", None) if token else None
+    saved = load_saved_tokens() or {}
+    persisted_refresh = saved.get("refresh_token")
+    effective_refresh = refresh_token or persisted_refresh
+
+    if effective_refresh:
+        try:
+            refreshed = client.refresh_token(effective_refresh)
+            next_refresh = getattr(refreshed, "refresh_token", None) or effective_refresh
+            save_tokens(
+                access_token=refreshed.access_token,
+                refresh_token=next_refresh,
+                expires_in=refreshed.expires_in,
+            )
+            return True
+        except Exception:
+            # Fall back to full OAuth below.
+            pass
+
+    try:
+        run_oauth_flow(client)
+        return True
+    except (AuthTimeoutError, AuthFlowError, Exception):
+        return False
+
+
+def ensure_valid_client(client: BluebeamClient) -> None:
+    """
+    Ensure the given client can authenticate API requests.
+
+    Raises:
+        ReauthenticationError if no recovery path succeeds.
+    """
+    if try_reauthenticate(client):
+        return
+    raise ReauthenticationError("Unable to re-authenticate with Bluebeam.")

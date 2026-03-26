@@ -29,6 +29,8 @@ from typing import Any
 
 from revu_wrangler import BluebeamClient
 
+from redline_radar.auth import ReauthenticationError, ensure_valid_client
+
 
 # ---------------------------------------------------------------------------
 # Type aliases for clarity
@@ -59,6 +61,23 @@ _ADDED_EXCLUSION_PATTERN = re.compile(r"^Added\s+'.*'$", re.IGNORECASE)
 _ACTIVITIES_PAGE_SIZE = 100
 
 
+def _with_auth_retry(client: BluebeamClient, operation: Any) -> Any:
+    """Run an API operation, retrying once after re-auth on auth failure."""
+    try:
+        return operation()
+    except Exception as exc:
+        msg = str(exc).lower()
+        if "401" not in msg and "403" not in msg and "unauthorized" not in msg:
+            raise
+
+        try:
+            ensure_valid_client(client)
+        except ReauthenticationError as reauth_exc:
+            raise reauth_exc from exc
+
+        return operation()
+
+
 # ---------------------------------------------------------------------------
 # Session info
 # ---------------------------------------------------------------------------
@@ -72,7 +91,7 @@ def fetch_session_info(client: BluebeamClient, session_id: str) -> SessionInfo:
     Returns:
         Session dict with at least ``Id``, ``Name``, ``Status`` fields.
     """
-    return client.sessions.get_session(session_id)
+    return _with_auth_retry(client, lambda: client.sessions.get_session(session_id))
 
 
 # ---------------------------------------------------------------------------
@@ -88,7 +107,7 @@ def fetch_session_files(
     Returns:
         List of file dicts, each with at least ``Id`` and ``Name``.
     """
-    resp = client.sessions.list_files(session_id)
+    resp = _with_auth_retry(client, lambda: client.sessions.list_files(session_id))
     return _extract_list(resp, ["Files", "files", "SessionFiles", "Items", "items"])
 
 
@@ -105,10 +124,13 @@ def _fetch_users_raw(
     The API response envelope key is ``SessionUsers``.
     """
     try:
-        resp = client.sessions.list_users(session_id)  # type: ignore[attr-defined]
+        resp = _with_auth_retry(
+            client,
+            lambda: client.sessions.list_users(session_id),  # type: ignore[attr-defined]
+        )
     except AttributeError:
         url = f"{client.base_url}/publicapi/v1/sessions/{session_id}/users"
-        http_resp = client.http.get(url)
+        http_resp = _with_auth_retry(client, lambda: client.http.get(url))
         http_resp.raise_for_status()
         resp = http_resp.json()
 
@@ -161,8 +183,11 @@ def _fetch_all_activities(
 
     while True:
         try:
-            resp = client.sessions.list_activities(  # type: ignore[attr-defined]
-                session_id, start=start
+            resp = _with_auth_retry(
+                client,
+                lambda: client.sessions.list_activities(  # type: ignore[attr-defined]
+                    session_id, start=start
+                ),
             )
         except (AttributeError, TypeError):
             # SDK method doesn't exist or doesn't accept start — raw HTTP
@@ -170,7 +195,9 @@ def _fetch_all_activities(
             params: dict[str, Any] = {}
             if start > 0:
                 params["start"] = start
-            http_resp = client.http.get(url, params=params)
+            http_resp = _with_auth_retry(
+                client, lambda: client.http.get(url, params=params)
+            )
             http_resp.raise_for_status()
             resp = http_resp.json()
 

@@ -34,6 +34,7 @@ from redline_radar.auth import (
     load_saved_tokens,
     AuthTimeoutError,
     AuthFlowError,
+    ReauthenticationError,
 )
 from redline_radar.config import ConfigurationError
 from redline_radar.api import (
@@ -265,9 +266,10 @@ def _authenticate():
         saved = load_saved_tokens()
 
     if saved:
-        console.print("[bold green]\u2714 Using saved credentials.[/bold green]")
+        console.print("[green]\u2022 Loaded saved token file.[/green]")
         try:
             client = get_authenticated_client()
+            console.print("[bold green]\u2714 Authentication ready.[/bold green]")
             return client
         except Exception:
             console.print(
@@ -408,7 +410,12 @@ def _handle_api_error(exc: Exception, session_id: str) -> None:
     elif "401" in msg or "403" in msg or "unauthorized" in msg.lower():
         console.print(
             "[bold red]\u2716 Authentication error.[/bold red]\n"
-            "[dim]  Your session may have expired. Restart the app to re-authenticate.[/dim]"
+            "[dim]  Session recovery failed after automatic re-authentication attempt.[/dim]"
+        )
+    elif isinstance(exc, ReauthenticationError):
+        console.print(
+            "[bold red]\u2716 Authentication recovery failed.[/bold red]\n"
+            "[dim]  Automatic re-authentication was attempted but did not succeed.[/dim]"
         )
     else:
         console.print(f"[bold red]\u2716 Failed to fetch session:[/bold red] {exc}")
