@@ -73,6 +73,7 @@ def save_tokens(
     access_token: str,
     refresh_token: str | None,
     expires_in: int,
+    scopes: list[str] | None = None,
 ) -> None:
     """Persist tokens to disk for reuse on subsequent runs."""
     TOKEN_DIR.mkdir(parents=True, exist_ok=True)
@@ -81,6 +82,8 @@ def save_tokens(
         "expires_in": expires_in,
         "saved_at": time.time(),
     }
+    if scopes:
+        data["scopes"] = list(scopes)
     if refresh_token:
         data["refresh_token"] = refresh_token
     TOKEN_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
@@ -222,6 +225,7 @@ def run_oauth_flow(client: BluebeamClient) -> None:
         access_token=token.access_token,
         refresh_token=token.refresh_token,
         expires_in=token.expires_in,
+        scopes=list(getattr(client, "scopes", []) or []),
     )
 
 
@@ -229,7 +233,7 @@ def run_oauth_flow(client: BluebeamClient) -> None:
 # Public API
 # ---------------------------------------------------------------------------
 
-def get_authenticated_client() -> BluebeamClient:
+def get_authenticated_client(scopes: list[str] | None = None) -> BluebeamClient:
     """
     Return an authenticated :class:`BluebeamClient` ready for API calls.
 
@@ -250,16 +254,24 @@ def get_authenticated_client() -> BluebeamClient:
     assert BLUEBEAM_CLIENT_ID is not None
     assert BLUEBEAM_CLIENT_SECRET is not None
 
+    requested_scopes = scopes or DEFAULT_SCOPES
+
     client = BluebeamClient(
         client_id=BLUEBEAM_CLIENT_ID,
         client_secret=BLUEBEAM_CLIENT_SECRET,
         redirect_uri=BLUEBEAM_REDIRECT_URI,
         region=BLUEBEAM_REGION,
-        scopes=DEFAULT_SCOPES,
+        scopes=requested_scopes,
     )
 
     # Try saved tokens
     saved = load_saved_tokens()
+    if saved:
+        saved_scopes = set(saved.get("scopes") or [])
+        if not saved_scopes or saved_scopes != set(requested_scopes):
+            clear_tokens()
+            saved = None
+
     if saved:
         try:
             client.set_token(
@@ -304,6 +316,7 @@ def try_reauthenticate(client: BluebeamClient) -> bool:
                 access_token=refreshed.access_token,
                 refresh_token=next_refresh,
                 expires_in=refreshed.expires_in,
+                scopes=list(getattr(client, "scopes", []) or []),
             )
             return True
         except Exception:

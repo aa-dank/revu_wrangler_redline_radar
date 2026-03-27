@@ -220,7 +220,7 @@
         </div>
         <div class="stat-card">
             <div class="stat-value">{{ total_markups }}</div>
-            <div class="stat-label">Total Markups</div>
+            <div class="stat-label">Total Markup Events</div>
         </div>
         <div class="stat-card">
             <div class="stat-value">{{ files_with_no_markups }}</div>
@@ -260,7 +260,7 @@
     <!-- ─── Section 2: Markup Activity by File ─────────────────────── -->
     <section id="markups">
         <h2>Markup Activity by File</h2>
-        <p class="description">Who has left markup on each file and when they last did so.</p>
+        <p class="description">Who has markup activity on each file and when they were last seen in the feed.</p>
 
         {% for file in files %}
         <div class="file-section{% if not file.markup_authors %} has-no-markups{% endif %}">
@@ -271,7 +271,7 @@
                 <thead>
                     <tr>
                         <th>Author</th>
-                        <th style="width: 120px;">Markup Count</th>
+                        <th style="width: 120px;">Markup Events</th>
                         <th style="width: 200px;">Most Recent</th>
                     </tr>
                 </thead>

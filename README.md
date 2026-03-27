@@ -1,6 +1,6 @@
 # Redline Radar
 
-A CLI tool that generates standalone HTML summary reports for Bluebeam Studio Sessions. Built for UCSC PPDO (Physical Planning, Development & Operations) project managers to quickly see who has entered a session and who has left markup on each file.
+A CLI tool that generates standalone HTML summary reports for Bluebeam Studio Sessions. Built for UCSC PPDO (Physical Planning, Development & Operations) project managers to quickly see who has entered a session and who has markup activity on each file.
 
 ## Documentation
 
@@ -16,3 +16,5 @@ This project uses [uv](https://docs.astral.sh/uv/) for package management.
 ```bash
 uv sync
 ```
+
+Each generated HTML report is paired with an Excel workbook containing the raw flattened activity feed and an enriched activity sheet derived from the same canonical data pipeline used for the report.

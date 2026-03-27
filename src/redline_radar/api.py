@@ -111,6 +111,20 @@ def fetch_session_files(
     return _extract_list(resp, ["Files", "files", "SessionFiles", "Items", "items"])
 
 
+def fetch_session_users(
+    client: BluebeamClient, session_id: str
+) -> list[dict[str, Any]]:
+    """Return the list of users currently associated with a session."""
+    return _fetch_users_raw(client, session_id)
+
+
+def fetch_session_activities(
+    client: BluebeamClient, session_id: str
+) -> list[dict[str, Any]]:
+    """Return the full paginated activity feed for a session."""
+    return _fetch_all_activities(client, session_id)
+
+
 # ---------------------------------------------------------------------------
 # Users listing (for name resolution)
 # ---------------------------------------------------------------------------

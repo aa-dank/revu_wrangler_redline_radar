@@ -29,7 +29,6 @@ from rich.table import Table
 from redline_radar import __version__
 from redline_radar.auth import (
     get_authenticated_client,
-    run_oauth_flow,
     clear_tokens,
     load_saved_tokens,
     AuthTimeoutError,
@@ -40,9 +39,11 @@ from redline_radar.config import ConfigurationError
 from redline_radar.api import (
     fetch_session_info,
     fetch_session_files,
-    build_attendance,
-    build_markup_summary,
+    fetch_session_users,
+    fetch_session_activities,
 )
+from redline_radar.activity_analysis import build_session_activity_analysis
+from redline_radar.activity_workbook import export_activity_workbook
 from redline_radar.report import generate_report
 
 # ---------------------------------------------------------------------------
@@ -52,6 +53,7 @@ from redline_radar.report import generate_report
 SESSION_ID_PATTERN = re.compile(r"\d{3}-\d{3}-\d{3}")
 
 console = Console()
+REPORT_SCOPES = ["full_user", "offline_access"]
 
 BANNER = rf"""
 [bold yellow]╔══════════════════════════════════════════════════╗
@@ -218,7 +220,7 @@ def _run() -> None:
             break
 
         # ── Data collection ──
-        attendance, markup_summary, markup_error = _collect_data(
+        analysis, markup_error = _collect_data(
             client, session_id
         )
 
@@ -232,13 +234,19 @@ def _run() -> None:
         try:
             output_path = generate_report(
                 session_info=session_info,
-                attendance=attendance,
-                files=markup_summary,
+                attendance=analysis.attendance,
+                files=analysis.file_summary,
+            )
+            workbook_path = export_activity_workbook(
+                raw_df=analysis.raw_df,
+                activities_df=analysis.activities_df,
+                output_path=output_path.with_name(f"{output_path.stem}_activities.xlsx"),
             )
             console.print(
                 f"\n[bold green]\u2714 Report generated:[/bold green] [cyan]{output_path.name}[/cyan]"
             )
             console.print(f"  Saved to: [cyan]{output_path}[/cyan]")
+            console.print(f"  Activity workbook: [cyan]{workbook_path}[/cyan]")
         except Exception as exc:
             console.print(f"[bold red]\u2716 Failed to generate report:[/bold red] {exc}")
 
@@ -268,7 +276,7 @@ def _authenticate():
     if saved:
         console.print("[green]\u2022 Loaded saved token file.[/green]")
         try:
-            client = get_authenticated_client()
+            client = get_authenticated_client(scopes=REPORT_SCOPES)
             console.print("[bold green]\u2714 Authentication ready.[/bold green]")
             return client
         except Exception:
@@ -287,7 +295,7 @@ def _authenticate():
     )
 
     try:
-        client = get_authenticated_client()
+        client = get_authenticated_client(scopes=REPORT_SCOPES)
         console.print("[bold green]\u2714 Authorized successfully.[/bold green]")
         return client
     except AuthTimeoutError:
@@ -335,64 +343,58 @@ def _collect_data(client, session_id: str):
     """
     Fetch attendance and markup data.
 
-    Markup data is now derived from the activities feed (the dedicated
-    markups endpoint does not exist).  Activities are fetched with
-    pagination and indexed by DocumentId.
+    Session summary data is now derived from the canonical activity feed.
 
     Returns:
-        Tuple of (attendance_list, markup_summary_list, markup_error_message_or_None).
+        Tuple of (analysis, error_message_or_None).
     """
-    attendance: list = []
-    markup_summary: list = []
-    markup_error: str | None = None
+    analysis = build_session_activity_analysis(activities=[], users=[], files=[])
+    data_error: str | None = None
+    files: list[dict] = []
+    users: list[dict] = []
+    activities: list[dict] = []
 
-    # Attendance (fetches activities + users internally)
     with console.status("[bold green]Fetching session data...", spinner="dots"):
+        errors: list[str] = []
+
         try:
-            attendance = build_attendance(client, session_id)
+            files = fetch_session_files(client, session_id)
         except Exception as exc:
-            console.print(f"[yellow]\u26a0 Could not fetch attendance: {exc}[/yellow]")
+            errors.append(f"files: {exc}")
+
+        try:
+            users = fetch_session_users(client, session_id)
+        except Exception as exc:
+            errors.append(f"users: {exc}")
+
+        try:
+            activities = fetch_session_activities(client, session_id)
+        except Exception as exc:
+            errors.append(f"activities: {exc}")
+
+        analysis = build_session_activity_analysis(
+            activities=activities,
+            users=users,
+            files=files,
+        )
+        if errors:
+            data_error = "; ".join(errors)
 
     console.print(
-        f"[bold green]\u2714[/bold green] Attendance: {len(attendance)} user(s) found."
+        f"[bold green]\u2714[/bold green] Attendance: {len(analysis.attendance)} user(s) found."
     )
-
-    # Files + markup summary (derived from activities)
-    try:
-        with console.status("[bold green]Fetching session files...", spinner="dots"):
-            files = fetch_session_files(client, session_id)
-
+    console.print(
+        f"[bold green]\u2714[/bold green] Files: {len(analysis.file_summary)} file(s) in session."
+    )
+    console.print(
+        f"[bold green]\u2714[/bold green] Activities: {len(analysis.activities_df)} row(s) analyzed."
+    )
+    if analysis.unknown_messages:
         console.print(
-            f"[bold green]\u2714[/bold green] Files: {len(files)} file(s) in session."
+            f"[yellow]\u26a0 Unclassified activity messages:[/yellow] {len(analysis.unknown_messages)}"
         )
 
-        if files:
-            with console.status(
-                "[bold green]Analysing markup activity...", spinner="dots"
-            ):
-                markup_summary = build_markup_summary(
-                    client, session_id, files
-                )
-
-            console.print("[bold green]\u2714[/bold green] Markup data collected.")
-
-    except Exception as exc:
-        markup_error = str(exc)
-        # Still return whatever attendance we have
-        try:
-            files = fetch_session_files(client, session_id)
-            markup_summary = [
-                {
-                    "name": f.get("Name", f"File {f.get('Id', '?')}"),
-                    "file_id": str(f.get("Id", "")),
-                    "markup_authors": [],
-                }
-                for f in files
-            ]
-        except Exception:
-            markup_summary = []
-
-    return attendance, markup_summary, markup_error
+    return analysis, data_error
 
 
 # ---------------------------------------------------------------------------

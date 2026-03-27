@@ -25,6 +25,7 @@ Exploratory scripts for validating Bluebeam Studio API behavior against the live
 | Script | Open Question |
 |--------|---------------|
 | `explore_activities.py` | What activity `Type` values does the API return? What fields are on each activity? |
+| `export_session_activities_excel.py` | What does the full session activity stream look like when flattened into a spreadsheet for audit/reconciliation? |
 | `explore_markups_pagination.py` | Do markup lists paginate? What does the response envelope look like? |
 | `explore_scope_requirements.py` | Can `read_prime` scope access markups/activities, or is `full_user` required? |
 
@@ -35,6 +36,7 @@ Each script uses a shared auth helper (`_auth_helper.py`) that handles the OAuth
 ```bash
 cd development
 python explore_activities.py 117-770-339
+python export_session_activities_excel.py 117-770-339
 python explore_markups_pagination.py 117-770-339
 python explore_scope_requirements.py 117-770-339
 ```
@@ -44,3 +46,5 @@ Token state is saved to `tokens.json` in the project root (gitignored).
 ## Output
 
 Scripts print raw JSON responses to stdout and save structured results to `development/output/` (also gitignored). Review these to update the specs with confirmed field names and behavior.
+
+The activity spreadsheet exporter writes both a timestamped `.xlsx` workbook and the raw JSON payload it was derived from so the flattened rows can be compared back to the source response.
