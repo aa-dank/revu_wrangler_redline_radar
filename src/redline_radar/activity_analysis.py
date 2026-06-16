@@ -53,6 +53,14 @@ def build_session_activity_analysis(
             for row in activities_df.itertuples(index=False)
         ]
     )
+    classification_columns = [
+        "activity_signal",
+        "activity_category",
+        "signal_rule",
+        "is_markup_activity",
+        "is_attendance_activity",
+    ]
+    classification_df = classification_df.reindex(columns=classification_columns)
     activities_df = pd.concat([activities_df.reset_index(drop=True), classification_df], axis=1)
     activities_df["user_name"] = activities_df.get("user_name", pd.Series(dtype="object")).fillna(activities_df["user_id"].astype("string"))
     activities_df["user_email"] = activities_df.get("user_email", pd.Series(dtype="object")).fillna("")
