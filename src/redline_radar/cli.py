@@ -192,17 +192,19 @@ def _run(session_id: str | None = None) -> None:
         sys.exit(1)
 
     # ── Session loop ──
+    cli_session_id = session_id
     while True:
         console.print()
         #session_id = prompt_session_id()
-        if session_id:
+        if cli_session_id:
+            session_id = cli_session_id
+            cli_session_id = None
             console.print(
                 f"[green]\u2714 Using Session ID from command line:[/green] "
                 f"[cyan]{session_id}[/cyan]"
             )
         else:
             session_id = prompt_session_id()
-            
         if not session_id:
             if not click.confirm("Try again?", default=True):
                 break

@@ -146,13 +146,20 @@ def _build_attendance_records(
         join_df = join_df.sort_values(by=["created_at", "created"], na_position="last")
         first_seen_df = join_df.drop_duplicates(subset=["user_id"], keep="first")
         first_seen_df = first_seen_df.sort_values(by=["created_at", "created"], na_position="last")
+
+        last_seen_df = join_df.drop_duplicates(subset=["user_id"], keep="last")
+        last_seen_df = activities_df.sort_values(by=["created_at", "created"])[["user_id", "created"]].rename(columns={"created": "last_seen"})
+
+        attendance_df = first_seen_df.merge(last_seen_df,on="user_id",how="left")
+
         return [
             {
                 "name": row.user_name if row.user_name else str(row.user_id),
                 "email": row.user_email or "",
                 "first_seen": row.created or "N/A",
+                "last_seen": row.last_seen or "N/A",
             }
-            for row in first_seen_df.itertuples(index=False)
+            for row in attendance_df.itertuples(index=False)
             if row.user_id is not pd.NA
         ]
 
