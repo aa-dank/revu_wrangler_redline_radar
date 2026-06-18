@@ -152,10 +152,11 @@ def prompt_session_id() -> str:
 # ---------------------------------------------------------------------------
 
 @click.command()
-def main() -> None:
+@click.argument("session_id", required=False)
+def main(session_id: str | None = None) -> None:
     """Redline Radar — Bluebeam Studio Session Summary Reporter."""
-    try:
-        _run()
+    try: 
+        _run(session_id)
     except KeyboardInterrupt:
         console.print("\n[bold red]\u2716 Interrupted.[/bold red]")
         sys.exit(0)
@@ -164,7 +165,7 @@ def main() -> None:
         sys.exit(0)
 
 
-def _run() -> None:
+def _run(session_id: str | None = None) -> None:
     """Core application loop."""
 
     # ── Banner ──
@@ -193,8 +194,15 @@ def _run() -> None:
     # ── Session loop ──
     while True:
         console.print()
-        session_id = prompt_session_id()
-
+        #session_id = prompt_session_id()
+        if session_id:
+            console.print(
+                f"[green]\u2714 Using Session ID from command line:[/green] "
+                f"[cyan]{session_id}[/cyan]"
+            )
+        else:
+            session_id = prompt_session_id()
+            
         if not session_id:
             if not click.confirm("Try again?", default=True):
                 break
