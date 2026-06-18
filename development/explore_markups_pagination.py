@@ -104,6 +104,7 @@ def main():
     # -----------------------------------------------------------------------
     print("\n--- Fetch 1: File-level markups ---")
     files = fetch_session_files(client, session_id)
+    printed_example = False
 
     for file_info in files:
         file_id = file_info["Id"]
@@ -117,8 +118,10 @@ def main():
             )
 
             print(f"{file_name}: {len(markups)} markups")
-            print("\nFirst markup example:")
-            print(json.dumps(markups[0], indent=2))
+            if markups and not printed_example:
+                print("\nFirst markup example:")
+                print(json.dumps(markups[0], indent=2))
+                printed_example = True
 
             authors = {}
             for markup in markups:
@@ -126,7 +129,7 @@ def main():
                 author = markup.get("author")
                 authors[author] = authors.get(author, 0) + 1
 
-            print(authors)
+            if markups: print(f"Authors: {authors}")
 
         except Exception as e:
             print(f"{file_name}: ERROR")
