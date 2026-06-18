@@ -208,7 +208,7 @@ def _fetch_all_activities(
             url = f"{client.base_url}/publicapi/v1/sessions/{session_id}/activities"
             params: dict[str, Any] = {}
             if start > 0:
-                params["start"] = start
+                params["offset"] = start
             http_resp = _with_auth_retry(
                 client, lambda: client.http.get(url, params=params)
             )
