@@ -24,6 +24,7 @@ from datetime import datetime
 from pathlib import Path
 
 from _auth_helper import get_authenticated_client
+from redline_radar.api import fetch_session_files
 
 OUTPUT_DIR = Path(__file__).parent / "output"
 
@@ -69,6 +70,21 @@ def _find_pagination_fields(envelope: dict) -> dict:
             pagination[key] = value
     return pagination
 
+def _updated_fetch_markups(client, session_id: str, file_id: int):
+    """
+    Fetch detailed markups for a single file using the v2 endpoint.
+    """
+
+    url = (
+        f"{client.base_url}/publicapi/v2/"
+        f"sessions/{session_id}/files/{file_id}/markups/details"
+    )
+
+    resp = client.http.get(url)
+    resp.raise_for_status()
+
+    return resp.json()
+
 
 def main():
     if len(sys.argv) < 2:
@@ -82,6 +98,39 @@ def main():
     client = get_authenticated_client()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    # -----------------------------------------------------------------------
+    # Fetch 0 — updated file-level markups 
+    # -----------------------------------------------------------------------
+    print("\n--- Fetch 1: File-level markups ---")
+    files = fetch_session_files(client, session_id)
+
+    for file_info in files:
+        file_id = file_info["Id"]
+        file_name = file_info["Name"]
+
+        try:
+            markups = _updated_fetch_markups(
+                client,
+                session_id,
+                file_id,
+            )
+
+            print(f"{file_name}: {len(markups)} markups")
+            print("\nFirst markup example:")
+            print(json.dumps(markups[0], indent=2))
+
+            authors = {}
+            for markup in markups:
+                # most applicable key here being authors imo
+                author = markup.get("author")
+                authors[author] = authors.get(author, 0) + 1
+
+            print(authors)
+
+        except Exception as e:
+            print(f"{file_name}: ERROR")
+            print(e)
 
     # -----------------------------------------------------------------------
     # Fetch 1 — default request (no pagination params)
