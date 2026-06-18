@@ -25,6 +25,7 @@ import json
 import sys
 from datetime import datetime
 from pathlib import Path
+from redline_radar.api import fetch_session_files
 
 from _auth_helper import (
     get_authenticated_client,
@@ -102,14 +103,25 @@ def _test_scope(scope_label: str, scopes: list[str], session_id: str) -> dict:
     print(f"  (Your browser will open — please log in to Bluebeam)")
     _run_oauth_flow(client)
 
-    base = f"{client.base_url}/publicapi/v1"
+    base = f"{client.base_url}/publicapi"
+    files = fetch_session_files(client, session_id)
+    if not files: raise RuntimeError("No files found in session")
+    file_id = files[0]["Id"]
 
     endpoints = [
-        ("GET /sessions/{id}", f"{base}/sessions/{session_id}"),
-        ("GET /sessions/{id}/users", f"{base}/sessions/{session_id}/users"),
-        ("GET /sessions/{id}/activities", f"{base}/sessions/{session_id}/activities"),
-        ("GET /sessions/{id}/markups", f"{base}/sessions/{session_id}/markups"),
-        ("GET /sessions/{id}/snapshots", f"{base}/sessions/{session_id}/snapshots"),
+        ("GET /sessions/{id}", f"{base}/v1/sessions/{session_id}"),
+        ("GET /sessions/{id}/users", f"{base}/v1/sessions/{session_id}/users"),
+        ("GET /sessions/{id}/activities", f"{base}/v1/sessions/{session_id}/activities"),
+        #("GET /sessions/{id}/markups", f"{base}/sessions/{session_id}/markups"),
+        (
+            "GET /sessions/{id}/files/{fileId}/markups/details",
+            f"{base}/v2/sessions/{session_id}/files/{file_id}/markups/details",
+        ),
+        #("GET /sessions/{id}/snapshots", f"{base}/v1/sessions/{session_id}/snapshots"),
+        (
+            "GET /sessions/{id}/files/{fileId}/snapshot", 
+            f"{base}/v1/sessions/{session_id}/files/{file_id}/snapshot",
+        ),
     ]
 
     results = []
@@ -188,14 +200,14 @@ def main():
     print(f"  RESULTS COMPARISON")
     print(f"{'='*60}")
     print()
-    print(f"  {'Endpoint':<40} {'read_prime':<15} {'full_user':<15}")
-    print(f"  {'-'*40} {'-'*15} {'-'*15}")
+    print(f"  {'Endpoint':<60} {'read_prime':<15} {'full_user':<15}")
+    print(f"  {'-'*60} {'-'*15} {'-'*15}")
 
     for ep_read, ep_full in zip(result_read["endpoints"], result_full["endpoints"]):
         label = ep_read["endpoint"]
         read_status = "OK" if ep_read["success"] else f"ERROR {ep_read.get('status_code', 'ERR')}"
         full_status = "OK" if ep_full["success"] else f"ERROR {ep_full.get('status_code', 'ERR')}"
-        print(f"  {label:<40} {read_status:<15} {full_status:<15}")
+        print(f"  {label:<60} {read_status:<15} {full_status:<15}")
 
     # Recommendation
     print()
