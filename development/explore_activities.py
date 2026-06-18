@@ -69,7 +69,7 @@ def main():
 
     # Try to find the activities list (could be under various keys)
     activities = []
-    for key in ["Activities", "activities", "Items", "items", "Records", "records"]:
+    for key in ["Activities", "activities", "Items", "items", "Records", "records", "SessionActivities"]:
         if key in activities_resp and isinstance(activities_resp[key], list):
             activities = activities_resp[key]
             print(f"  Activities found under key: '{key}'")
@@ -83,7 +83,7 @@ def main():
             print("  WARNING: Could not locate activities list in response!")
             print(f"  Full response: {json.dumps(activities_resp, indent=2, default=str)[:2000]}")
 
-    print(f"\n  Total activities returned: {len(activities)}")
+    print(f"\n  Total activities returned: {len(activities)}") # only counting first page, since page max 100 will only output that? should highlight this is only page 1
 
     if not activities:
         print("\n  No activities found. Is this session active with users?")
