@@ -146,9 +146,7 @@ def _build_attendance_records(
         join_df = join_df.sort_values(by=["created_at", "created"], na_position="last")
         first_seen_df = join_df.drop_duplicates(subset=["user_id"], keep="first")
         first_seen_df = first_seen_df.sort_values(by=["created_at", "created"], na_position="last")
-
-        last_seen_df = join_df.drop_duplicates(subset=["user_id"], keep="last")
-        last_seen_df = activities_df.sort_values(by=["created_at", "created"])[["user_id", "created"]].rename(columns={"created": "last_seen"})
+        last_seen_df = (activities_df.groupby("user_id", as_index=False)["created"].max().rename(columns={"created": "last_seen"}))
 
         attendance_df = first_seen_df.merge(last_seen_df,on="user_id",how="left")
 

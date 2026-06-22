@@ -192,6 +192,7 @@ def _run(session_id: str | None = None) -> None:
         sys.exit(1)
 
     # ── Session loop ──
+    auto_generate = session_id is not None
     cli_session_id = session_id
     while True:
         console.print()
@@ -222,12 +223,12 @@ def _run(session_id: str | None = None) -> None:
 
         # ── Display and confirm ──
         _display_session_info(session_info, session_id)
-
-        if not click.confirm("Generate report for this session?", default=True):
-            console.print("[bold red]\u2716 Cancelled[/bold red]")
-            if click.confirm("Check another session?", default=False):
-                continue
-            break
+        if not auto_generate:
+            if not click.confirm("Generate report for this session?", default=True):
+                console.print("[bold red]\u2716 Cancelled[/bold red]")
+                if click.confirm("Check another session?", default=False):
+                    continue
+                break
 
         # ── Data collection ──
         analysis, markup_error = _collect_data(
