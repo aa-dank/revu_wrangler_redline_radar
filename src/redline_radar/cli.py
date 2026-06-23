@@ -411,14 +411,13 @@ def _collect_data(client, session_id: str):
         f"[bold green]\u2714[/bold green] Activities: {len(analysis.activities_df)} row(s) analyzed."
     )
     if cache_hit:
-        if cache_valid:
-            console.print(
-                f"[bold green]\u2714[/bold green] Cache validated: {cached_count} activities stored."
-            )
-        else:
-            console.print(
+        console.print(
                 f"[bold green]\u2714[/bold green] Loaded {len(activities)} activities from cache."
             )
+    elif cache_valid:
+        console.print(
+            f"[bold green]\u2714[/bold green] Cache validated: {cached_count} activities stored."
+        )  
     if analysis.unknown_messages:
         console.print(
             f"[yellow]\u26a0 Unclassified activity messages:[/yellow] {len(analysis.unknown_messages)}"
