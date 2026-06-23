@@ -47,7 +47,15 @@ from redline_radar.api import (
 from redline_radar.activity_analysis import build_session_activity_analysis
 from redline_radar.activity_workbook import export_activity_workbook
 from redline_radar.report import generate_report
-from redline_radar.cache import (initialize_db, save_activities, save_session_cache, validate_cache, has_cached_activities, load_activities, load_session_cache)
+from redline_radar.cache import (
+    initialize_db,
+    save_session_cache,
+    load_session_cache, 
+    save_activities, 
+    load_activities,
+    validate_cache, 
+    has_session_cache
+)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -67,8 +75,8 @@ BANNER = rf"""
 ║   ██   ██ ██      ██   ██ ██      ██ ██  ███ ██  ║
 ║   ██   ██ ███████ ██████  ███████ ██ ██   ██ ███ ║
 ║                                                  ║
-║          [italic dim]Redline Radar v{__version__}[/italic dim]                     ║
-║       [italic dim]Bluebeam Session Summary Reporter[/italic dim]           ║
+║          [italic dim]Redline Radar v{__version__}[/italic dim]                    ║
+║       [italic dim]Bluebeam Session Summary Reporter[/italic dim]          ║
 ╚══════════════════════════════════════════════════╝[/bold yellow]
 """
 
@@ -370,6 +378,7 @@ def _collect_data(client, session_id: str):
     cache_hit: bool = False
     cache_valid: bool = False
     cached_count: int = 0
+    new_activity_count: int = 0
 
     with console.status("[bold green]Fetching session data...", spinner="dots"):
         errors: list[str] = []
@@ -384,12 +393,14 @@ def _collect_data(client, session_id: str):
         except Exception as exc:
             errors.append(f"users: {exc}")
 
-        """try:
-            activities = fetch_session_activities(client, session_id)
-        except Exception as exc:
-            errors.append(f"activities: {exc}")"""
         try:
-            (activities, cache_hit, cache_valid, cached_count) = get_session_activities(client, session_id)
+            (
+                activities, 
+                cache_hit,
+                cache_valid, 
+                cached_count,
+                new_activity_count
+            ) = get_session_activities(client, session_id)
         except Exception as exc:
             errors.append(f"activities/cache: {exc}")
 
@@ -411,12 +422,20 @@ def _collect_data(client, session_id: str):
         f"[bold green]\u2714[/bold green] Activities: {len(analysis.activities_df)} row(s) analyzed."
     )
     if cache_hit:
+        activity_label = "activity" if len(activities) == 1 else "activities"
         console.print(
-                f"[bold green]\u2714[/bold green] Loaded {len(activities)} activities from cache."
+                f"[bold green]\u2714[/bold green] Loaded {len(activities)} {activity_label} from cache."
             )
-    elif cache_valid:
+    elif new_activity_count > 0:
+        activity_label = "activity" if new_activity_count == 1 else "activities"
+        total_label = "activity" if cached_count == 1 else "activities"
         console.print(
-            f"[bold green]\u2714[/bold green] Cache validated: {cached_count} activities stored."
+            f"[bold green]\u2714[/bold green] Cache updated: {new_activity_count} new {activity_label} stored ({cached_count} {total_label})."
+        )  
+    elif cache_valid:
+        activity_label = "activity" if cached_count == 1 else "activities"
+        console.print(
+            f"[bold green]\u2714[/bold green] Cache validated: {cached_count} {activity_label} stored."
         )  
     if analysis.unknown_messages:
         console.print(
@@ -431,22 +450,27 @@ def _collect_data(client, session_id: str):
 def get_session_activities(
     client,
     session_id: str,
-) -> tuple[list[dict], bool, bool, int]:
+) -> tuple[list[dict], bool, bool, int, int]:
     """
     Retrieve activities for a session, using the local cache when possible.
-
     Cache validation is performed using the session activity count reported
-    by the Bluebeam API. If the cached activity count matches the API's
-    TotalCount value, activities are loaded from cache. Otherwise the
-    activity history is re-fetched and the cache is refreshed.
+    by the Bluebeam API. 
+
+    If session_id is cached and the cached activity count matches 
+    the API's TotalCount value, activities are loaded from cache. 
+    If session-id is cached but activity count does not match API's 
+    TotalCount, fetch session activities with ids larger than latest 
+    session activity id in cache. 
+    Otherwise the entire activity history is fetched and saved to cache.
     """
     cache_hit: bool = False
     cache_valid: bool = False
     cached_count: int = 0
+    new_activity_count: int = 0
     initialize_db()
 
     # Existing cache found
-    if has_cached_activities(session_id):
+    if has_session_cache(session_id):
         expected_count = get_activity_count(client, session_id)
         cache_valid, cached_count = validate_cache(session_id, expected_count)
 
@@ -454,17 +478,33 @@ def get_session_activities(
         if cache_valid:
             cache_hit = True
             activities = load_activities(session_id)
-            return (activities, cache_hit, cache_valid, cached_count) #cached_count ?????
+            return (activities, cache_hit, cache_valid, cached_count, 0)
         
-    # Cache missing or invalid, then fetch complete activity from Bluebeam and save to cache
-    activities = fetch_session_activities_after_id(client, session_id,0) # more to come
-    save_session_cache(session_id,activities)
+        # Cache exists but is missing activities, so fetch only activities newwer than latest activity
+        cache_info = load_session_cache(session_id)
+        if cache_info is None:
+            raise RuntimeError(
+                f"Cache metadata missing for session {session_id}"
+            )
+        _, latest_activity_id, _ = cache_info
+        new_activities = fetch_session_activities_after_id(
+            client, session_id, latest_activity_id)
+        new_activity_count = len(new_activities)
+        save_activities(session_id,new_activities)
+        activities = load_activities(session_id)
+        save_session_cache(session_id,activities)
+        cache_valid, cached_count = validate_cache(session_id, expected_count)
+            
+        return (activities, False, cache_valid, cached_count, new_activity_count)
+        
+    # Cache missing or invalid, fetch complete activity from Bluebeam and save to cache
+    activities = fetch_session_activities(client, session_id)
     save_activities(session_id,activities)
+    save_session_cache(session_id,activities)
 
     expected_count = get_activity_count(client, session_id)
     cache_valid, cached_count = validate_cache(session_id, expected_count)
-    
-    return (activities, False, cache_valid, cached_count)
+    return (activities, False, cache_valid, cached_count, 0)
 
 # ---------------------------------------------------------------------------
 # Error handling

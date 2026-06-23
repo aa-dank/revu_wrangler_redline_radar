@@ -172,13 +172,12 @@ def has_session_cache(session_id: str) -> bool:
     with get_connection() as conn:
         row = conn.execute(
             """
-            SELECT 1
+            SELECT COUNT(*)
             FROM session_cache
             WHERE session_id = ?
             """,
             (session_id,),
         ).fetchone()
-
     return row[0] > 0
 
 def has_cached_activities(session_id: str) -> bool:
@@ -193,17 +192,3 @@ def has_cached_activities(session_id: str) -> bool:
         ).fetchone()
 
     return row[0] > 0
-
-# ---------------------------------------------------------------------------
-# Clear Cache
-# ---------------------------------------------------------------------------
-def clear_session_cache(session_id: str):
-    with get_connection() as conn:
-        conn.execute(
-            "DELETE FROM session_cache WHERE session_id = ?",
-            (session_id,),
-        )
-        conn.execute(
-            "DELETE FROM activities WHERE session_id = ?",
-            (session_id,),
-        )
