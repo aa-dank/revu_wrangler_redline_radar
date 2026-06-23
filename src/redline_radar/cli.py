@@ -41,10 +41,13 @@ from redline_radar.api import (
     fetch_session_files,
     fetch_session_users,
     fetch_session_activities,
+    fetch_session_activities_after_id,
+    get_activity_count
 )
 from redline_radar.activity_analysis import build_session_activity_analysis
 from redline_radar.activity_workbook import export_activity_workbook
 from redline_radar.report import generate_report
+from redline_radar.cache import (initialize_db, save_activities, save_session_cache, validate_cache, has_cached_activities, load_activities, load_session_cache)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -364,6 +367,9 @@ def _collect_data(client, session_id: str):
     files: list[dict] = []
     users: list[dict] = []
     activities: list[dict] = []
+    cache_hit: bool = False
+    cache_valid: bool = False
+    cached_count: int = 0
 
     with console.status("[bold green]Fetching session data...", spinner="dots"):
         errors: list[str] = []
@@ -378,10 +384,14 @@ def _collect_data(client, session_id: str):
         except Exception as exc:
             errors.append(f"users: {exc}")
 
-        try:
+        """try:
             activities = fetch_session_activities(client, session_id)
         except Exception as exc:
-            errors.append(f"activities: {exc}")
+            errors.append(f"activities: {exc}")"""
+        try:
+            (activities, cache_hit, cache_valid, cached_count) = get_session_activities(client, session_id)
+        except Exception as exc:
+            errors.append(f"activities/cache: {exc}")
 
         analysis = build_session_activity_analysis(
             activities=activities,
@@ -400,6 +410,15 @@ def _collect_data(client, session_id: str):
     console.print(
         f"[bold green]\u2714[/bold green] Activities: {len(analysis.activities_df)} row(s) analyzed."
     )
+    if cache_hit:
+        if cache_valid:
+            console.print(
+                f"[bold green]\u2714[/bold green] Cache validated: {cached_count} activities stored."
+            )
+        else:
+            console.print(
+                f"[bold green]\u2714[/bold green] Loaded {len(activities)} activities from cache."
+            )
     if analysis.unknown_messages:
         console.print(
             f"[yellow]\u26a0 Unclassified activity messages:[/yellow] {len(analysis.unknown_messages)}"
@@ -407,6 +426,46 @@ def _collect_data(client, session_id: str):
 
     return analysis, data_error
 
+# ---------------------------------------------------------------------------
+# Activity Retrieval / Caching
+# ---------------------------------------------------------------------------
+def get_session_activities(
+    client,
+    session_id: str,
+) -> tuple[list[dict], bool, bool, int]:
+    """
+    Retrieve activities for a session, using the local cache when possible.
+
+    Cache validation is performed using the session activity count reported
+    by the Bluebeam API. If the cached activity count matches the API's
+    TotalCount value, activities are loaded from cache. Otherwise the
+    activity history is re-fetched and the cache is refreshed.
+    """
+    cache_hit: bool = False
+    cache_valid: bool = False
+    cached_count: int = 0
+    initialize_db()
+
+    # Existing cache found
+    if has_cached_activities(session_id):
+        expected_count = get_activity_count(client, session_id)
+        cache_valid, cached_count = validate_cache(session_id, expected_count)
+
+        # Cache must containe same number activities reported in Bluebeam API, then load from SQLite
+        if cache_valid:
+            cache_hit = True
+            activities = load_activities(session_id)
+            return (activities, cache_hit, cache_valid, cached_count) #cached_count ?????
+        
+    # Cache missing or invalid, then fetch complete activity from Bluebeam and save to cache
+    activities = fetch_session_activities_after_id(client, session_id,0) # more to come
+    save_session_cache(session_id,activities)
+    save_activities(session_id,activities)
+
+    expected_count = get_activity_count(client, session_id)
+    cache_valid, cached_count = validate_cache(session_id, expected_count)
+    
+    return (activities, False, cache_valid, cached_count)
 
 # ---------------------------------------------------------------------------
 # Error handling

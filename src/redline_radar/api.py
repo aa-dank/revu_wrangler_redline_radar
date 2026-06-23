@@ -124,6 +124,11 @@ def fetch_session_activities(
     """Return the full paginated activity feed for a session."""
     return _fetch_all_activities(client, session_id)
 
+def fetch_session_activities_after_id(
+    client: BluebeamClient, session_id: str, after_id: int
+) -> list[dict[str, Any]]:
+    """Return the activity feed for a session after a specific activity_id"""
+    return _fetch_activities_after_id(client, session_id, after_id)
 
 # ---------------------------------------------------------------------------
 # Users listing (for name resolution)
@@ -240,6 +245,58 @@ def _fetch_all_activities(
 
     return all_activities
 
+# ---------------------------------------------------------------------------
+# Activities newer than activity_id (with pagination)
+# ---------------------------------------------------------------------------
+def _fetch_activities_after_id(
+    client: BluebeamClient,
+    session_id: str,
+    after_id: int,
+) -> list[dict[str, Any]]:
+    """
+    Fetch all activities newer than a previously-seen activity ID.
+    The Bluebeam API supports an ``afterId`` query parameter which
+    returns only activities with IDs greater than the supplied value.
+
+    This is used by the cache layer to incrementally update a cached
+    session rather than re-downloading the entire activity history.    
+    """
+    all_activities: list[dict[str, Any]] = []
+    params: dict[str, Any] = {}
+
+    while True:
+        url = f"{client.base_url}/publicapi/v1/sessions/{session_id}/activities"
+        # Request only activities newer than the most recently-seen activity ID
+        params = {
+            "afterId": after_id, 
+            "limit": _ACTIVITIES_PAGE_SIZE,
+        }
+
+        http_resp = _with_auth_retry(
+                client, lambda: client.http.get(url, params=params)
+            )
+        http_resp.raise_for_status()
+        resp = http_resp.json()
+
+        page = _extract_list(
+            resp, ["SessionActivities", "Activities", "activities", "Items", "items"]
+        )
+        if not page:
+            break
+
+        all_activities.extend(page)
+
+        # Advance the cursor so the next request asks for activities
+        # newer than the newest activity we have already received.
+        after_id = max(
+            int(activity["Id"])
+            for activity in page
+        )
+
+        if len(page) < _ACTIVITIES_PAGE_SIZE:
+            break
+
+    return all_activities
 
 # ---------------------------------------------------------------------------
 # Attendance from activities
@@ -459,3 +516,19 @@ def _extract_list(
                 return resp[key]
 
     return []
+
+def get_activity_count(
+    client: BluebeamClient,
+    session_id: str,
+) -> int:
+    params: dict[str, Any] = {}
+    while True:
+        url = f"{client.base_url}/publicapi/v1/sessions/{session_id}/activities"
+        params["limit"] = 1
+        http_resp = _with_auth_retry(
+                client, lambda: client.http.get(url, params=params)
+            )
+        http_resp.raise_for_status()
+        resp = http_resp.json()
+
+        return int(resp["TotalCount"])
