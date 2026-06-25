@@ -139,18 +139,6 @@ def load_activities(session_id: str) -> list[dict]:
         for row in rows
     ]
 
-def get_latest_activity_id(session_id: str) -> int | None:
-    with get_connection() as conn:
-        row = conn.execute(
-            """
-            SELECT MAX(activity_id) AS max_id
-            FROM activities
-            WHERE session_id = ?
-            """,
-            (session_id,),
-        ).fetchone()
-    return row["max_id"] if row else None
-
 # ---------------------------------------------------------------------------
 # Validation & Check for Content
 # ---------------------------------------------------------------------------
@@ -178,17 +166,4 @@ def has_session_cache(session_id: str) -> bool:
             """,
             (session_id,),
         ).fetchone()
-    return row[0] > 0
-
-def has_cached_activities(session_id: str) -> bool:
-    with get_connection() as conn:
-        row = conn.execute(
-            """
-            SELECT COUNT(*)
-            FROM activities
-            WHERE session_id = ?
-            """,
-            (session_id,),
-        ).fetchone()
-
     return row[0] > 0

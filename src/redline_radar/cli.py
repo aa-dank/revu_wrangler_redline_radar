@@ -462,6 +462,8 @@ def get_session_activities(
     TotalCount, fetch session activities with ids larger than latest 
     session activity id in cache. 
     Otherwise the entire activity history is fetched and saved to cache.
+
+    Return: activities, cache_hit, cache_valid, cached_count, new_activity_count
     """
     cache_hit: bool = False
     cache_valid: bool = False
@@ -474,13 +476,13 @@ def get_session_activities(
         expected_count = get_activity_count(client, session_id)
         cache_valid, cached_count = validate_cache(session_id, expected_count)
 
-        # Cache must containe same number activities reported in Bluebeam API, then load from SQLite
+        # Cache must contain same number activities reported in Bluebeam API, then load from SQLite
         if cache_valid:
             cache_hit = True
             activities = load_activities(session_id)
             return (activities, cache_hit, cache_valid, cached_count, 0)
         
-        # Cache exists but is missing activities, so fetch only activities newwer than latest activity
+        # Cache exists but is missing activities, so fetch only activities newer than latest activity
         cache_info = load_session_cache(session_id)
         if cache_info is None:
             raise RuntimeError(
