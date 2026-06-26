@@ -57,6 +57,11 @@ from redline_radar.cache import (
     has_session_cache
 )
 
+from redline_radar.cache_json import (
+    CacheJSON
+)
+
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -400,7 +405,7 @@ def _collect_data(client, session_id: str):
                 cache_valid, 
                 cached_count,
                 new_activity_count
-            ) = get_session_activities(client, session_id)
+            ) = get_session_activities_JSON(client, session_id)
         except Exception as exc:
             errors.append(f"activities/cache: {exc}")
 
@@ -445,7 +450,7 @@ def _collect_data(client, session_id: str):
     return analysis, data_error
 
 # ---------------------------------------------------------------------------
-# Activity Retrieval / Caching
+# Activity Retrieval / Caching USING SQLITE
 # ---------------------------------------------------------------------------
 def get_session_activities(
     client,
@@ -455,6 +460,8 @@ def get_session_activities(
     Retrieve activities for a session, using the local cache when possible.
     Cache validation is performed using the session activity count reported
     by the Bluebeam API. 
+    Cache is saved on user's local computer, so cache is individual to 
+    each user - not shared. 
 
     If session_id is cached and the cached activity count matches 
     the API's TotalCount value, activities are loaded from cache. 
@@ -506,6 +513,63 @@ def get_session_activities(
 
     expected_count = get_activity_count(client, session_id)
     cache_valid, cached_count = validate_cache(session_id, expected_count)
+    return (activities, False, cache_valid, cached_count, 0)
+
+# ---------------------------------------------------------------------------
+# Activity Retrieval / Caching USING JSON
+# ---------------------------------------------------------------------------
+def get_session_activities_JSON(
+    client,
+    session_id: str,
+) -> tuple[list[dict], bool, bool, int, int]:
+    """
+    Functionality mirrors `get_session_activities`; the only difference is how the
+    cache is stored.
+
+    The cache is persisted as a shared JSON file located alongside the application.
+    A file lock is used to ensure that only one process can modify the cache at a
+    time, preventing concurrent writes from corrupting the file.
+    """
+    cache_hit: bool = False
+    cache_valid: bool = False
+    cached_count: int = 0
+    new_activity_count: int = 0
+    cache = CacheJSON()
+
+    #Existing cache found
+    cache_info = cache.get_session(session_id)
+    if (cache_info is not None):
+        expected_count = get_activity_count(client, session_id)
+        cache_valid, cached_count = cache.validate(session_id, expected_count)
+
+        # Cache must contain same number activities reported in Bluebeam API, then load from SQLite
+        if cache_valid:
+            cache_hit = True
+            activities = cache.get_activities(session_id)
+            return (activities, cache_hit, cache_valid, cached_count, 0)
+        # Cache exists but is missing activities, so fetch only activities newer than latest activity
+        else:
+            if cache_info is None:
+                raise RuntimeError(
+                    f"Cache metadata missing for session {session_id}"
+                )
+            latest_activity_id = cache_info["latest_activity_id"]
+            expected_count = get_activity_count(client, session_id)
+
+            new_activities = fetch_session_activities_after_id(
+                client, session_id, latest_activity_id)
+            new_activity_count = len(new_activities)
+            cache.save_activities(session_id, new_activities)
+            activities = cache.get_activities(session_id)
+            cache_valid, cached_count = cache.validate(session_id, expected_count)
+
+            return (activities, False, cache_valid, cached_count, new_activity_count)
+    # Cache missing or invalid, fetch complete activity from Bluebeam and save to cache
+    activities = fetch_session_activities(client, session_id)
+    cache.save_activities(session_id,activities)
+
+    expected_count = get_activity_count(client, session_id)
+    cache_valid, cached_count = cache.validate(session_id, expected_count)
     return (activities, False, cache_valid, cached_count, 0)
 
 # ---------------------------------------------------------------------------
