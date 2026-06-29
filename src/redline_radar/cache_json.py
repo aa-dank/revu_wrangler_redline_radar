@@ -1,6 +1,7 @@
 from pathlib import Path
 from datetime import datetime, UTC
 from filelock import FileLock
+from contextlib import contextmanager
 import json, sys, os
 import time
 
@@ -8,101 +9,104 @@ class CacheJSON:
     CACHE_VERSION = 1
     def __init__(self):
         app_dir = get_cache_directory()
-        self.cache_path = app_dir / "cache.json"
-        self.lock = FileLock(str(self.cache_path) + ".lock")
+        self.cache_dir = app_dir / "cache"
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
 
-        if not self.cache_path.exists():
-            self._save({
-                "version": self.CACHE_VERSION,
-                "sessions": {}
-            })
 # ---------------------------------------------------------------------------
 # Private
 # ---------------------------------------------------------------------------
-    def _load(self):
+    def _cache_path(self, session_id: str) -> Path:
+        return self.cache_dir / f"{session_id}.json"
+
+    def _lock(self, session_id: str):
+        return FileLock(str(self._cache_path(session_id)) + ".lock")
+    
+    @contextmanager
+    def _session_lock(self, session_id: str):
         start = time.perf_counter()
-
-        with self.lock:
+        lock = self._lock(session_id)
+        lock.acquire()
+        
+        try:
             waited = time.perf_counter() - start
-
-            # Only report if we actually had to wait for another process
             if waited > 0.1:
                 print(f"⏳ Waiting for shared cache... ({waited:.2f}s)")
+            yield
+        finally:
+            lock.release()
 
-            with self.cache_path.open("r", encoding="utf-8") as f:
-                return json.load(f)
+    def _load(self, session_id: str):
+        cache_path = self._cache_path(session_id)
+
+        if not cache_path.exists():
+            return {
+                "activity_count": 0,
+                "latest_activity_id": 0,
+                "activities": {}
+            }
+        
+        with cache_path.open("r", encoding="utf-8") as f:
+            return json.load(f)
 
 
-    def _save(self, cache):
-        temp_path = self.cache_path.with_suffix(".tmp")
+    def _save(self, session_id: str, cache: dict):
+        cache_path = self._cache_path(session_id)
+        temp = cache_path.with_suffix(".tmp")
 
-        start = time.perf_counter()
+        with temp.open("w", encoding="utf-8") as f:
+            json.dump(cache, f, indent=2, sort_keys=True)
 
-        with self.lock:
-            waited = time.perf_counter() - start
-
-            # Only report if another process was already writing
-            if waited > 0.1:
-                print(f"⏳ Waiting for shared cache... ({waited:.2f}s)")
-
-            with temp_path.open("w", encoding="utf-8") as f:
-                json.dump(cache, f, indent=2)
-
-            os.replace(temp_path, self.cache_path)
-
-    def _modify_cache(self, callback):
-        with self.lock:
-            cache = self.load_unlocked()
-            callback(cache)
-            self.save_unlocked(cache)
+        os.replace(temp, cache_path)
 
 # ---------------------------------------------------------------------------
 # Get Cache
 # ---------------------------------------------------------------------------
-    def get_session(self, session_id: str) -> dict | None:
-        cache = self._load()
-        return cache["sessions"].get(session_id)
-    
     def get_activities(self, session_id: str):
-        session = self.get_session(session_id)
-        if session is None: return []
+        with self._session_lock(session_id):
+            cache = self._load(session_id)
 
         return sorted(
-            session.get("activities", {}).values(),
-            key=lambda activity: int(activity["Id"])
+            cache["activities"].values(),
+            key=lambda a: int(a["Id"])
         )
+    
+    def get_session(self, session_id: str) -> dict:
+        with self._session_lock(session_id):
+            cache = self._load(session_id)
+        
+        return {
+            "activity_count": cache["activity_count"],
+            "latest_activity_id": cache["latest_activity_id"]
+        }
 
 # ---------------------------------------------------------------------------
 # Save to Cache
 # ---------------------------------------------------------------------------
     def save_activities(self, session_id: str, activities: list[dict]):
-        if not activities:return
+        with self._session_lock(session_id):
+            cache = self._load(session_id)
+            
+            stored = cache.setdefault("activities", {})
 
-        cache = self._load()
-        session = cache["sessions"].setdefault(
-            session_id,
-            {"activities": {}}
-        )
+            for activity in activities:
+                stored[str(activity["Id"])] = activity
 
-        # Save activities
-        stored = session.setdefault("activities", {})
-        for activity in activities:
-            stored[str(activity["Id"])] = activity
+            cache["activity_count"] = len(stored)
+            cache["latest_activity_id"] = max(
+                (int(activity_id) for activity_id in stored.keys()),
+                default=0,
+            )
 
-        # Update metadata
-        session["activity_count"] = len(stored)
-        session["latest_activity_id"] = max(
-            int(activity_id) for activity_id in stored
-        )
-        session["last_synced"] = datetime.now(UTC).isoformat()
-
-        self._save(cache)
+            self._save(session_id, cache)
 
 # ---------------------------------------------------------------------------
 # Validation 
 # ---------------------------------------------------------------------------
     def validate(self, session_id: str, expected_count: int) -> tuple[bool, int]:
-        cached_count = len(self.get_activities(session_id))
+        with self._session_lock(session_id):
+            cache = self._load(session_id)
+            cached_count = cache["activity_count"]
+
         return cached_count == expected_count, cached_count 
     
 def get_cache_directory() -> Path:

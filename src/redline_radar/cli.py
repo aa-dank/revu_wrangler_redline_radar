@@ -245,7 +245,7 @@ def _run(session_id: str | None = None) -> None:
                 if click.confirm("Check another session?", default=False):
                     continue
                 break
-
+        auto_generate = False
         # ── Data collection ──
         analysis, markup_error = _collect_data(
             client, session_id
@@ -534,41 +534,35 @@ def get_session_activities_JSON(
     cache_valid: bool = False
     cached_count: int = 0
     new_activity_count: int = 0
+    expected_count = get_activity_count(client, session_id)
     cache = CacheJSON()
 
     #Existing cache found
     cache_info = cache.get_session(session_id)
     if (cache_info is not None):
-        expected_count = get_activity_count(client, session_id)
         cache_valid, cached_count = cache.validate(session_id, expected_count)
 
-        # Cache must contain same number activities reported in Bluebeam API, then load from SQLite
+        # Cache is already complete
         if cache_valid:
             cache_hit = True
             activities = cache.get_activities(session_id)
             return (activities, cache_hit, cache_valid, cached_count, 0)
-        # Cache exists but is missing activities, so fetch only activities newer than latest activity
-        else:
-            if cache_info is None:
-                raise RuntimeError(
-                    f"Cache metadata missing for session {session_id}"
-                )
-            latest_activity_id = cache_info["latest_activity_id"]
-            expected_count = get_activity_count(client, session_id)
+        # Cache exists but needs updating 
+        new_activities = fetch_session_activities_after_id(
+            client, 
+            session_id, 
+            cache_info["latest_activity_id"]
+        )
+        new_activity_count = len(new_activities)
+        cache.save_activities(session_id, new_activities)
+        activities = cache.get_activities(session_id)
+        cache_valid, cached_count = cache.validate(session_id, expected_count)
 
-            new_activities = fetch_session_activities_after_id(
-                client, session_id, latest_activity_id)
-            new_activity_count = len(new_activities)
-            cache.save_activities(session_id, new_activities)
-            activities = cache.get_activities(session_id)
-            cache_valid, cached_count = cache.validate(session_id, expected_count)
-
-            return (activities, False, cache_valid, cached_count, new_activity_count)
+        return (activities, False, cache_valid, cached_count, new_activity_count)
     # Cache missing or invalid, fetch complete activity from Bluebeam and save to cache
     activities = fetch_session_activities(client, session_id)
     cache.save_activities(session_id,activities)
 
-    expected_count = get_activity_count(client, session_id)
     cache_valid, cached_count = cache.validate(session_id, expected_count)
     return (activities, False, cache_valid, cached_count, 0)
 
