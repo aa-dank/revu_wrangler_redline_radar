@@ -39,4 +39,4 @@ tokens.json
 
 # Test outputs
 development/output/
-cache.json
+cache/
