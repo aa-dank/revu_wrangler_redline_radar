@@ -11,7 +11,6 @@ The application retrieves session information from the Bluebeam API, caches acti
 # Requirements
 
 - Bluebeam Studio account
-- Network access to the shared cache location (if applicable)
 - Valid API credentials
 - Internet connection
 
@@ -26,7 +25,7 @@ Double-click `redline-radar.exe`
 or run from a command prompt:
 
 ```text
-redline-radar.exe
+./redline-radar.exe
 ```
 
 ## Command Line
@@ -34,37 +33,13 @@ redline-radar.exe
 To automatically generate a report for a known session:
 
 ```text
-redline-radar.exe <session_id>
+./redline-radar.exe <session_id>
 ```
 
 Example:
 
 ```text
-redline-radar.exe 854-338-514
-```
-
-If no session ID is supplied, the application will prompt for one.
-
----
-
-# Entering a Session
-
-A session can be entered as:
-
-- Session ID
-- Studio Session URL
-- Invitation text containing the Session ID
-
-Examples:
-
-```text
-854-338-514
-```
-
-or
-
-```text
-https://studio.bluebeam.com/.../854-338-514
+redline-radar.exe 117-770-339
 ```
 
 ---
@@ -76,19 +51,20 @@ Each report produces:
 - HTML report
 - Excel workbook containing all activity records
 
-Reports are saved to the configured output directory.
+Reports are saved to the **Downloads** folder on the user's local computer.
 
 ---
 
 # Activity Cache
 
-Activity data is cached to reduce repeated API requests.
+Activity data is cached to reduce repeated API requests and improve program speed. 
 
 ## Cache Design
 
 Each Studio Session is stored as an individual JSON file:
 
 ```text
+redline_radar.exe
 cache/
     117-770-339.json
     583-318-681.json
@@ -100,15 +76,13 @@ Each cache file contains:
 - Cached activities
 - Latest activity ID
 - Activity count
-- Last synchronized timestamp
-
-Only new activities are downloaded when an existing cache is present.
 
 ---
 
 # Shared Cache
 
-The cache is designed to be shared between multiple users.
+The cache is designed to be shared between multiple users. 
+If another user is updating the same session cache, the application waits until the update is complete before reading or writing the cache. Users accessing different sessions can continue working simultaneously without blocking one another.
 
 Each session has its own lock file:
 
@@ -116,19 +90,17 @@ Each session has its own lock file:
 854-338-514.json.lock
 ```
 
-File locking ensures only one process updates a session cache at a time while allowing different sessions to be processed simultaneously.
-
 ---
 
-# Updating Cached Data
+# Cache Outputs
 
-When generating a report:
+When generating a report, the application will display one of the following messages:
 
-1. Check whether a cache exists.
-2. Compare cached activity count with the Bluebeam API.
-3. If the cache is current, load activities from cache.
-4. Otherwise, download only new activities.
-5. Update the cache.
+- **Loaded _N_ activities from cache** – The cache contains all activity data for the session, and loads activities from cache to output reports.
+
+- **Cache updated: _N_ new activities stored (_T_ activities)** – The cache existed but was missing recent activity, so only the new activities were fetched from Bluebeam and added to the cache.
+
+- **Cache created: _N_ activities stored** – No cache existed for the session. All activities were downloaded from Bluebeam and saved  to cache for future use.
 
 ---
 
@@ -137,6 +109,14 @@ When generating a report:
 Authentication uses OAuth.
 
 The application stores refresh tokens locally to avoid repeated browser logins.
+
+The token file is stored at:
+
+```text
+C:\Users\<username>\.redline_radar\tokens.json
+```
+
+If authentication issues occur, deleting this file will force the application to prompt for a new Bluebeam login the next time it is run.
 
 ---
 
