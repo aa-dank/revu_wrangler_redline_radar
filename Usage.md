@@ -39,7 +39,7 @@ To automatically generate a report for a known session:
 Example:
 
 ```text
-redline-radar.exe 117-770-339
+./redline-radar.exe 117-770-339
 ```
 
 ---
