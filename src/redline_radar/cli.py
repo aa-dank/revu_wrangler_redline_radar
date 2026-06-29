@@ -47,10 +47,7 @@ from redline_radar.api import (
 from redline_radar.activity_analysis import build_session_activity_analysis
 from redline_radar.activity_workbook import export_activity_workbook
 from redline_radar.report import generate_report
-from redline_radar.cache_json import (
-    CacheJSON
-)
-
+from redline_radar.cache_json import CacheJSON
 
 # ---------------------------------------------------------------------------
 # Constants

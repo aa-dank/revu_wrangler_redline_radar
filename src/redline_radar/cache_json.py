@@ -29,7 +29,7 @@ class CacheJSON:
         
         try:
             waited = time.perf_counter() - start
-            if waited > 0.1:
+            if waited > 1.0:
                 print(f"⏳ Waiting for shared cache... ({waited:.2f}s)")
             yield
         finally:
