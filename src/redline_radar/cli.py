@@ -47,16 +47,6 @@ from redline_radar.api import (
 from redline_radar.activity_analysis import build_session_activity_analysis
 from redline_radar.activity_workbook import export_activity_workbook
 from redline_radar.report import generate_report
-from redline_radar.cache import (
-    initialize_db,
-    save_session_cache,
-    load_session_cache, 
-    save_activities, 
-    load_activities,
-    validate_cache, 
-    has_session_cache
-)
-
 from redline_radar.cache_json import (
     CacheJSON
 )
@@ -448,72 +438,6 @@ def _collect_data(client, session_id: str):
         )
 
     return analysis, data_error
-
-# ---------------------------------------------------------------------------
-# Activity Retrieval / Caching USING SQLITE
-# ---------------------------------------------------------------------------
-def get_session_activities(
-    client,
-    session_id: str,
-) -> tuple[list[dict], bool, bool, int, int]:
-    """
-    Retrieve activities for a session, using the local cache when possible.
-    Cache validation is performed using the session activity count reported
-    by the Bluebeam API. 
-    Cache is saved on user's local computer, so cache is individual to 
-    each user - not shared. 
-
-    If session_id is cached and the cached activity count matches 
-    the API's TotalCount value, activities are loaded from cache. 
-    If session-id is cached but activity count does not match API's 
-    TotalCount, fetch session activities with ids larger than latest 
-    session activity id in cache. 
-    Otherwise the entire activity history is fetched and saved to cache.
-
-    Return: activities, cache_hit, cache_valid, cached_count, new_activity_count
-    """
-    cache_hit: bool = False
-    cache_valid: bool = False
-    cached_count: int = 0
-    new_activity_count: int = 0
-    initialize_db()
-
-    # Existing cache found
-    if has_session_cache(session_id):
-        expected_count = get_activity_count(client, session_id)
-        cache_valid, cached_count = validate_cache(session_id, expected_count)
-
-        # Cache must contain same number activities reported in Bluebeam API, then load from SQLite
-        if cache_valid:
-            cache_hit = True
-            activities = load_activities(session_id)
-            return (activities, cache_hit, cache_valid, cached_count, 0)
-        
-        # Cache exists but is missing activities, so fetch only activities newer than latest activity
-        cache_info = load_session_cache(session_id)
-        if cache_info is None:
-            raise RuntimeError(
-                f"Cache metadata missing for session {session_id}"
-            )
-        _, latest_activity_id, _ = cache_info
-        new_activities = fetch_session_activities_after_id(
-            client, session_id, latest_activity_id)
-        new_activity_count = len(new_activities)
-        save_activities(session_id,new_activities)
-        activities = load_activities(session_id)
-        save_session_cache(session_id,activities)
-        cache_valid, cached_count = validate_cache(session_id, expected_count)
-            
-        return (activities, False, cache_valid, cached_count, new_activity_count)
-        
-    # Cache missing or invalid, fetch complete activity from Bluebeam and save to cache
-    activities = fetch_session_activities(client, session_id)
-    save_activities(session_id,activities)
-    save_session_cache(session_id,activities)
-
-    expected_count = get_activity_count(client, session_id)
-    cache_valid, cached_count = validate_cache(session_id, expected_count)
-    return (activities, False, cache_valid, cached_count, 0)
 
 # ---------------------------------------------------------------------------
 # Activity Retrieval / Caching USING JSON
