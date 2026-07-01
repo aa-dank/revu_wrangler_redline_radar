@@ -367,8 +367,7 @@ def _collect_data(client, session_id: str):
     files: list[dict] = []
     users: list[dict] = []
     activities: list[dict] = []
-    cache_hit: bool = False
-    cache_valid: bool = False
+    cache_status: str = "unavailable"
     cached_count: int = 0
     new_activity_count: int = 0
 
@@ -388,8 +387,7 @@ def _collect_data(client, session_id: str):
         try:
             (
                 activities, 
-                cache_hit,
-                cache_valid, 
+                cache_status,
                 cached_count,
                 new_activity_count
             ) = get_session_activities_JSON(client, session_id)
@@ -413,22 +411,27 @@ def _collect_data(client, session_id: str):
     console.print(
         f"[bold green]\u2714[/bold green] Activities: {len(analysis.activities_df)} row(s) analyzed."
     )
-    if cache_hit:
+    if cache_status == "hit":
         activity_label = "activity" if len(activities) == 1 else "activities"
         console.print(
                 f"[bold green]\u2714[/bold green] Loaded {len(activities)} {activity_label} from cache."
             )
-    elif new_activity_count > 0:
+    elif cache_status == "updated":
         activity_label = "activity" if new_activity_count == 1 else "activities"
         total_label = "activity" if cached_count == 1 else "activities"
         console.print(
             f"[bold green]\u2714[/bold green] Cache updated: {new_activity_count} new {activity_label} stored ({cached_count} {total_label})."
         )  
-    elif cache_valid:
+    elif cache_status == "created":
         activity_label = "activity" if cached_count == 1 else "activities"
         console.print(
-            f"[bold green]\u2714[/bold green] Cache validated: {cached_count} {activity_label} stored."
-        )  
+            f"[bold green]\u2714[/bold green] Cache created: {cached_count} {activity_label} stored."
+        )
+    else: 
+        activity_label = "activity" if len(activities) == 1 else "activities"
+        console.print(
+            f"[bold green]\u2714[/bold green] Cache unavailable: {len(activities)} {activity_label} fetched from Bluebeam."
+        )
     if analysis.unknown_messages:
         console.print(
             f"[yellow]\u26a0 Unclassified activity messages:[/yellow] {len(analysis.unknown_messages)}"
@@ -442,50 +445,77 @@ def _collect_data(client, session_id: str):
 def get_session_activities_JSON(
     client,
     session_id: str,
-) -> tuple[list[dict], bool, bool, int, int]:
+) -> tuple[list[dict], str, int, int]:
     """
-    Functionality mirrors `get_session_activities`; the only difference is how the
-    cache is stored.
+    Retrieve activities for a Bluebeam session using the shared JSON cache.
 
-    The cache is persisted as a shared JSON file located alongside the application.
-    A file lock is used to ensure that only one process can modify the cache at a
-    time, preventing concurrent writes from corrupting the file.
+    Each session is cached in its own JSON file, allowing different sessions to be
+    accessed concurrently. A per-session file lock ensures that only one process
+    can update a session cache at a time while allowing other sessions to be
+    processed simultaneously.
+
+    If the cache is unavailable or cannot be updated, the application
+    automatically falls back to the Bluebeam API so report generation is not
+    interrupted.
+
+    Cache status (returned after the activity list) indicates how the
+    activity data was obtained:
+        hit         - Cache was valid and all activities were loaded from cache.
+        updated     - Cache existed but was missing activities; only the new
+                    activities were downloaded and appended to the cache.
+        created     - No cache existed; all activities were downloaded and a
+                    new cache was created.
+        unavailable - The cache could not be used or updated; all activities
+                    were retrieved directly from the Bluebeam API.
     """
-    cache_hit: bool = False
     cache_valid: bool = False
     cached_count: int = 0
     new_activity_count: int = 0
     expected_count = get_activity_count(client, session_id)
     cache = CacheJSON()
 
-    #Existing cache found
-    cache_info = cache.get_session(session_id)
-    if (cache_info is not None):
+    try:
+        cache_info = cache.get_session(session_id)
+        # Existing cache found
+        if cache_info["activity_count"] > 0:
+            cache_valid, cached_count = cache.validate(session_id, expected_count)
+
+            # Cache is current, retrun cached activities
+            if cache_valid:
+                activities = cache.get_activities(session_id)
+                print("1_")
+                return (activities, "hit", cached_count, 0)
+            
+            # Cache exists but needs updating 
+            new_activities = fetch_session_activities_after_id(
+                client, 
+                session_id, 
+                cache_info["latest_activity_id"]
+            )
+            new_activity_count = len(new_activities)
+            try:
+                cache.save_activities(session_id, new_activities)
+                activities = cache.get_activities(session_id)
+                cache_valid, cached_count = cache.validate(session_id, expected_count)
+                if cache_valid: return (activities, "updated", cached_count, new_activity_count)
+                
+            except Exception as exc: 
+                # Cache update failed. Fall through to a full API fetch
+                pass
+            
+        # Cache missing or unavailable, download all activities and create new cache
+        activities = fetch_session_activities(client, session_id)
+        cache.save_activities(session_id,activities)
         cache_valid, cached_count = cache.validate(session_id, expected_count)
-
-        # Cache is already complete
-        if cache_valid:
-            cache_hit = True
-            activities = cache.get_activities(session_id)
-            return (activities, cache_hit, cache_valid, cached_count, 0)
-        # Cache exists but needs updating 
-        new_activities = fetch_session_activities_after_id(
-            client, 
-            session_id, 
-            cache_info["latest_activity_id"]
-        )
-        new_activity_count = len(new_activities)
-        cache.save_activities(session_id, new_activities)
-        activities = cache.get_activities(session_id)
-        cache_valid, cached_count = cache.validate(session_id, expected_count)
-
-        return (activities, False, cache_valid, cached_count, new_activity_count)
-    # Cache missing or invalid, fetch complete activity from Bluebeam and save to cache
-    activities = fetch_session_activities(client, session_id)
-    cache.save_activities(session_id,activities)
-
-    cache_valid, cached_count = cache.validate(session_id, expected_count)
-    return (activities, False, cache_valid, cached_count, 0)
+        if cache_valid: return (activities, "created", cached_count, 0)
+        
+        # Cache created but validation failed. Fall through to a full API fetch
+        raise RuntimeError("Cache validation failed after saving activities.")
+        
+    except Exception as exc:
+        # Fall back to full API fetch
+        activities = fetch_session_activities(client, session_id)
+        return (activities, "unavailable", len(activities), 0)
 
 # ---------------------------------------------------------------------------
 # Error handling
