@@ -155,10 +155,19 @@ def prompt_session_id() -> str:
 # ---------------------------------------------------------------------------
 
 @click.command()
-@click.argument("session_id", required=False)
-def main(session_id: str | None = None) -> None:
+@click.argument("session_input", required=False)
+def main(session_input: str | None = None) -> None:
     """Redline Radar — Bluebeam Studio Session Summary Reporter."""
-    try: 
+    if session_input:
+        session_id = extract_session_id(session_input)
+        if session_id is None:
+            console.print(
+                "[bold red]\u2716 Unable to extract a valid Session ID from the command-line argument.[/bold red]"
+            )
+    else:
+        session_id = None
+
+    try:
         _run(session_id)
     except KeyboardInterrupt:
         console.print("\n[bold red]\u2716 Interrupted.[/bold red]")
@@ -508,7 +517,7 @@ def get_session_activities_JSON(
         cache.save_activities(session_id,activities)
         cache_valid, cached_count = cache.validate(session_id, expected_count)
         if cache_valid: return (activities, "created", cached_count, 0)
-        
+
         # Cache created but validation failed. Fall through to a full API fetch
         raise RuntimeError("Cache validation failed after saving activities.")
         
