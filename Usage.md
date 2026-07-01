@@ -16,16 +16,26 @@ The application retrieves session information from the Bluebeam API, caches acti
 
 ---
 
+# Permissions
+
+To generate a report, the authenticated Bluebeam account must be a member of the session. 
+
+If the account is able to join and view a session in Bluebeam, it should also be able to generate a report for that session. The application only retrieves session information and does not modify any session data.
+
+The application uses Bluebeam's read-only API permissions and follows the principle of least privilege. No additional administrative privileges or ownership of the Studio Session are required by the application itself. If a report cannot be generated, first verify that the authenticated account has access to the Studio Session.
+
+---
+
 # Running the Application
 
 ## Executable
 
-Double-click `redline-radar.exe`
+Double-click `redline_radar.exe`
 
 or run from a command prompt:
 
 ```text
-./redline-radar.exe
+./redline_radar.exe
 ```
 
 ## Command Line
@@ -33,14 +43,36 @@ or run from a command prompt:
 To automatically generate a report for a known session:
 
 ```text
-./redline-radar.exe <session_id>
+./redline_radar.exe <session_input>
 ```
 
 Example:
 
 ```text
-./redline-radar.exe 117-770-339
+./redline_radar.exe 117-770-339
 ```
+
+---
+
+# Typical Workflow
+
+1. Launch the application.
+2. Authenticate with Bluebeam (first run only).
+3. Enter or paste a Studio Session ID, URL, or invitation.
+4. The application retrieves session information and activity data.
+5. An HTML report and Excel workbook are generated in the Downloads folder.
+
+---
+
+# Session Input
+
+The application accepts any of the following:
+
+- Studio Session ID
+- Studio Session URL
+- Bluebeam invitation text containing a Session ID
+
+The Session ID is automatically extracted before the report is generated.
 
 ---
 
@@ -57,18 +89,20 @@ Reports are saved to the **Downloads** folder on the user's local computer.
 
 # Activity Cache
 
-Activity data is cached to reduce repeated API requests and improve program speed. 
+Activity data is cached to reduce repeated Bluebeam API requests and improve report generation time.
 
 ## Cache Design
 
-Each Studio Session is stored as an individual JSON file:
+Each Studio Session is cached in its own JSON file:
 
 ```text
-redline_radar.exe
-cache/
-    117-770-339.json
-    583-318-681.json
-    854-338-514.json
+Shared Application Folder/
+│
+├── redline_radar.exe
+└── cache/
+    ├── 117-770-339.json
+    ├── 583-318-681.json
+    └── 854-338-514.json
 ```
 
 Each cache file contains:
@@ -102,13 +136,15 @@ When generating a report, the application will display one of the following mess
 
 - **Cache created: _N_ activities stored** – No cache existed for the session. All activities were downloaded from Bluebeam and saved  to cache for future use.
 
+- **Cache unavailable** – The shared cache could not be accessed or updated. The application automatically retrieves all activity data directly from Bluebeam and continues generating the report.
+
 ---
 
 # Authentication
 
 Authentication uses OAuth.
 
-The application stores refresh tokens locally to avoid repeated browser logins.
+On the first run, the application opens a browser window to authenticate with Bluebeam. After successful authentication, a refresh token is stored locally and subsequent launches typically do not require signing in again.
 
 The token file is stored at:
 
@@ -132,12 +168,13 @@ Delete the saved token file and authenticate again.
 
 ## Cache issues
 
-Deleting the appropriate session JSON file forces the application to retrieve all activities again.
+Deleting a session's cache file causes the application to download the complete activity history from Bluebeam the next time a report is generated for that session.
 
 ---
 
 # Notes
 
+- Report generation is read-only. The application never modifies Studio Sessions, documents, or markups.
 - Activity caching significantly reduces report generation time for previously processed sessions.
 - Only new activities are downloaded after the initial cache is created.
 - The shared cache supports multiple concurrent users.
