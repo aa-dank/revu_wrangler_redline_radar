@@ -492,7 +492,6 @@ def get_session_activities_JSON(
             # Cache is current, retrun cached activities
             if cache_valid:
                 activities = cache.get_activities(session_id)
-                print("1_")
                 return (activities, "hit", cached_count, 0)
             
             # Cache exists but needs updating 
