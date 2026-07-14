@@ -52,6 +52,30 @@ Example:
 ./redline_radar.exe 117-770-339
 ```
 
+### Command Line Options
+
+**`--debug`** – Enable debug logging
+
+Enables detailed debug logging to a timestamped file for troubleshooting authentication and token issues.
+
+```text
+./redline_radar.exe --debug
+```
+
+Or with a session ID:
+
+```text
+./redline_radar.exe 117-770-339 --debug
+```
+
+Debug logs are saved to:
+
+```text
+C:\Users\<username>\.redline_radar\logs\redline_radar_YYYY-MM-DD_HHMMSS.log
+```
+
+Each run with `--debug` creates a new timestamped log file containing detailed information about the OAuth flow, token persistence, and authentication attempts.
+
 ---
 
 # Typical Workflow
@@ -146,6 +170,8 @@ Authentication uses OAuth.
 
 On the first run, the application opens a browser window to authenticate with Bluebeam. After successful authentication, a refresh token is stored locally and subsequent launches typically do not require signing in again.
 
+### Token Storage
+
 The token file is stored at:
 
 ```text
@@ -153,6 +179,26 @@ C:\Users\<username>\.redline_radar\tokens.json
 ```
 
 If authentication issues occur, deleting this file will force the application to prompt for a new Bluebeam login the next time it is run.
+
+### Debug Logging
+
+To diagnose authentication issues, use the `--debug` flag to enable detailed logging:
+
+```text
+./redline_radar.exe --debug
+```
+
+Debug logs are saved to:
+
+```text
+C:\Users\<username>\.redline_radar\logs\
+```
+
+Logs include information about:
+- Token loading and expiration
+- OAuth flow steps (browser launch, callback, token exchange)
+- Token refresh attempts
+- Re-authentication procedures
 
 ---
 
@@ -165,6 +211,14 @@ Verify the Studio Session contains activity and that your account has permission
 ## Authentication failed
 
 Delete the saved token file and authenticate again.
+
+To debug authentication issues, run with the `--debug` flag:
+
+```text
+./redline_radar.exe --debug
+```
+
+This will create a detailed log file at `C:\Users\<username>\.redline_radar\logs\` showing the complete OAuth flow, token refresh attempts, and any errors that occur during authentication.
 
 ## Cache issues
 
