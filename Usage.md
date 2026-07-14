@@ -40,6 +40,8 @@ or run from a command prompt:
 
 ## Command Line
 
+### Command Line Arguments
+
 To automatically generate a report for a known session:
 
 ```text
@@ -52,11 +54,13 @@ Example:
 ./redline_radar.exe 117-770-339
 ```
 
+If needed, there is more information about session input below.
+
 ### Command Line Options
 
 **`--debug`** – Enable debug logging
 
-Enables detailed debug logging to a timestamped file for troubleshooting authentication and token issues.
+Enables detailed debug logging to a timestamped file for troubleshooting authentication and token issues. If there is no flag no log files will be created. 
 
 ```text
 ./redline_radar.exe --debug
@@ -184,10 +188,6 @@ If authentication issues occur, deleting this file will force the application to
 
 To diagnose authentication issues, use the `--debug` flag to enable detailed logging:
 
-```text
-./redline_radar.exe --debug
-```
-
 Debug logs are saved to:
 
 ```text
@@ -212,13 +212,7 @@ Verify the Studio Session contains activity and that your account has permission
 
 Delete the saved token file and authenticate again.
 
-To debug authentication issues, run with the `--debug` flag:
-
-```text
-./redline_radar.exe --debug
-```
-
-This will create a detailed log file at `C:\Users\<username>\.redline_radar\logs\` showing the complete OAuth flow, token refresh attempts, and any errors that occur during authentication.
+To debug authentication issues, use `--debug` flag. This will create a detailed log file at `C:\Users\<username>\.redline_radar\logs\` showing the complete OAuth flow, token refresh attempts, and any errors that occur during authentication.
 
 ## Cache issues
 
