@@ -156,7 +156,8 @@ def prompt_session_id() -> str:
 
 @click.command()
 @click.argument("session_input", required=False)
-def main(session_input: str | None = None) -> None:
+@click.option("--debug", is_flag=True, help="Enable debug logging to file")
+def main(session_input: str | None = None, debug: bool = False) -> None:
     """Redline Radar — Bluebeam Studio Session Summary Reporter."""
     if session_input:
         session_id = extract_session_id(session_input)
@@ -168,7 +169,7 @@ def main(session_input: str | None = None) -> None:
         session_id = None
 
     try:
-        _run(session_id)
+        _run(session_id, debug=debug)
     except KeyboardInterrupt:
         console.print("\n[bold red]\u2716 Interrupted.[/bold red]")
         sys.exit(0)
@@ -177,7 +178,7 @@ def main(session_input: str | None = None) -> None:
         sys.exit(0)
 
 
-def _run(session_id: str | None = None) -> None:
+def _run(session_id: str | None = None, debug: bool = False) -> None:
     """Core application loop."""
 
     # ── Banner ──
@@ -199,7 +200,7 @@ def _run(session_id: str | None = None) -> None:
         sys.exit(1)
 
     # ── Authentication ──
-    client = _authenticate()
+    client = _authenticate(debug=debug)
     if client is None:
         sys.exit(1)
 
@@ -290,7 +291,7 @@ def _run(session_id: str | None = None) -> None:
 # Auth
 # ---------------------------------------------------------------------------
 
-def _authenticate():
+def _authenticate(debug: bool = False):
     """Handle authentication, returning a BluebeamClient or None."""
     with console.status(
         "[bold green]Checking authentication...", spinner="dots"
@@ -300,7 +301,7 @@ def _authenticate():
     if saved:
         console.print("[green]\u2022 Loaded saved token file.[/green]")
         try:
-            client = get_authenticated_client(scopes=REPORT_SCOPES)
+            client = get_authenticated_client(scopes=REPORT_SCOPES, debug=debug)
             console.print("[bold green]\u2714 Authentication ready.[/bold green]")
             return client
         except Exception:
@@ -319,7 +320,7 @@ def _authenticate():
     )
 
     try:
-        client = get_authenticated_client(scopes=REPORT_SCOPES)
+        client = get_authenticated_client(scopes=REPORT_SCOPES, debug=debug)
         console.print("[bold green]\u2714 Authorized successfully.[/bold green]")
         return client
     except AuthTimeoutError:

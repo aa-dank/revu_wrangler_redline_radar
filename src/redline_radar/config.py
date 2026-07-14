@@ -147,6 +147,7 @@ DEFAULT_SCOPES = [scope for scope in get_scope().split() if scope]
 
 TOKEN_DIR = Path.home() / ".redline_radar"
 TOKEN_FILE = TOKEN_DIR / "tokens.json"
+LOG_DIR = Path.home() / ".redline_radar" / "logs"
 
 OUTPUT_DIR = Path.home() / "Downloads"
 if not OUTPUT_DIR.exists():
