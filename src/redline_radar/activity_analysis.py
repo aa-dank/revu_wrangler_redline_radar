@@ -66,6 +66,9 @@ def build_session_activity_analysis(
     activities_df["user_email"] = activities_df.get("user_email", pd.Series(dtype="object")).fillna("")
     activities_df["file_name"] = activities_df.get("file_name", pd.Series(dtype="object")).fillna("")
 
+    raw_df["Username"] = activities_df["user_name"]
+    raw_df["User Email"] = activities_df["user_email"]
+
     attendance = _build_attendance_records(activities_df, users_df)
     file_summary = _build_file_summary(activities_df, files_df)
     unknown_messages = sorted(
