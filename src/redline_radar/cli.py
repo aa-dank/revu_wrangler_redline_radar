@@ -266,10 +266,11 @@ def _run(session_id: str | None = None) -> None:
                 output_path=output_path.with_name(f"{output_path.stem}_activities.xlsx"),
             )
             console.print(
-                f"\n[bold green]\u2714 Report generated:[/bold green] [cyan]{output_path.name}[/cyan]"
+                f"\n[bold green]\u2714 Report generated:[/bold green] [cyan]{output_path.name}[/cyan]",
+                highlight=False
             )
-            console.print(f"  Saved to: [cyan]{output_path}[/cyan]")
-            console.print(f"  Activity workbook: [cyan]{workbook_path}[/cyan]")
+            console.print(f"  Saved to: [cyan]{output_path}[/cyan]", highlight=False)
+            console.print(f"  Activity workbook: [cyan]{workbook_path}[/cyan]", highlight=False)
         except Exception as exc:
             console.print(f"[bold red]\u2716 Failed to generate report:[/bold red] {exc}")
 
